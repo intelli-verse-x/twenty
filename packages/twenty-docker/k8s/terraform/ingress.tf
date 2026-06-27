@@ -7,6 +7,8 @@ resource "kubernetes_ingress" "twentycrm" {
       "kubernetes.io/ingress.class"                       = "nginx"
       "nginx.ingress.kubernetes.io/configuration-snippet" = <<EOF
       more_set_headers "X-Forwarded-For $http_x_forwarded_for";
+      more_clear_headers "X-Frame-Options";
+      add_header Content-Security-Policy "frame-ancestors 'self' https://admin.intelli-verse-x.ai http://localhost:3000 http://localhost:3001" always;
       EOF
       "nginx.ingress.kubernetes.io/force-ssl-redirect"    = "false"
       "nginx.ingress.kubernetes.io/backend-protocol"      = "HTTP"

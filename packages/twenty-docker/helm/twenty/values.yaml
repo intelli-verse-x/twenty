@@ -69,7 +69,10 @@ server:
     enabled: true
     className: nginx
     acme: true  # add cert-manager annotation for Let's Encrypt
-    annotations: {}
+    annotations:
+      nginx.ingress.kubernetes.io/configuration-snippet: |
+        more_clear_headers "X-Frame-Options";
+        add_header Content-Security-Policy "frame-ancestors 'self' https://admin.intelli-verse-x.ai http://localhost:3000 http://localhost:3001" always;
     hosts:
       - host: crm.example.com
         paths:
