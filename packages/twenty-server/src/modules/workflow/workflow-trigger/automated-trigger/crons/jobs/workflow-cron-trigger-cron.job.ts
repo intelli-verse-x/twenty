@@ -30,9 +30,13 @@ import { shouldRunNow } from 'src/utils/should-run-now.utils';
 
 export const WORKFLOW_CRON_TRIGGER_CRON_PATTERN = '* * * * *';
 
+const POSTGRES_UNDEFINED_TABLE_ERROR_CODE = '42P01';
+
 @Processor(MessageQueue.cronQueue)
 export class WorkflowCronTriggerCronJob {
   private readonly logger = new Logger(WorkflowCronTriggerCronJob.name);
+
+  private readonly workspacesMissingTriggerTable = new Set<string>();
 
   constructor(
     @InjectDataSource()
@@ -195,8 +199,25 @@ export class WorkflowCronTriggerCronJob {
         }
       }
 
+      this.workspacesMissingTriggerTable.delete(workspaceId);
+
       return triggersToCache;
     } catch (error) {
+      if (this.isMissingTriggerTableError(error)) {
+        if (!this.workspacesMissingTriggerTable.has(workspaceId)) {
+          this.workspacesMissingTriggerTable.add(workspaceId);
+          this.logger.warn(
+            `Workspace ${workspaceId}: skipping - "workflowAutomatedTrigger" table does not exist. The workspace metadata migrations have likely not been applied.`,
+          );
+        } else {
+          this.logger.debug(
+            `Workspace ${workspaceId}: still missing "workflowAutomatedTrigger" table, skipping`,
+          );
+        }
+
+        return [];
+      }
+
       this.logger.error(`Error processing workspace ${workspaceId}: ${error}`);
       this.exceptionHandlerService.captureExceptions([error], {
         workspace: { id: workspaceId },
@@ -204,5 +225,16 @@ export class WorkflowCronTriggerCronJob {
 
       return [];
     }
+  }
+
+  private isMissingTriggerTableError(error: unknown): boolean {
+    const code = (error as { code?: string } | null)?.code;
+    const message = (error as { message?: string } | null)?.message;
+
+    return (
+      code === POSTGRES_UNDEFINED_TABLE_ERROR_CODE &&
+      isDefined(message) &&
+      message.includes('workflowAutomatedTrigger" does not exist')
+    );
   }
 }
