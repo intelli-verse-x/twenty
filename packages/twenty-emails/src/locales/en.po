@@ -44,8 +44,8 @@ msgstr "The workspace will be deactivated in {remainingDays} {dayOrDays}, and al
 
 #. js-lingui-explicit-id
 #: src/emails/warn-suspended-workspace.email.tsx
-msgid "If you wish to continue using Twenty, please update your subscription within the next {remainingDays} {dayOrDays}."
-msgstr "If you wish to continue using Twenty, please update your subscription within the next {remainingDays} {dayOrDays}."
+msgid "If you wish to continue using CRM, please update your subscription within the next {remainingDays} {dayOrDays}."
+msgstr "If you wish to continue using CRM, please update your subscription within the next {remainingDays} {dayOrDays}."
 
 #. js-lingui-explicit-id
 #: src/emails/warn-suspended-workspace.email.tsx
@@ -70,8 +70,8 @@ msgstr "Test email"
 
 #. js-lingui-explicit-id
 #: src/emails/send-invite-link.email.tsx
-msgid "Join your team on Twenty"
-msgstr "Join your team on Twenty"
+msgid "Join your team on CRM"
+msgstr "Join your team on CRM"
 
 #. js-lingui-explicit-id
 #: src/emails/send-invite-link.email.tsx
@@ -120,8 +120,8 @@ msgstr "If you did not initiate this change, please contact your workspace owner
 
 #. js-lingui-explicit-id
 #: src/emails/password-update-notify.email.tsx
-msgid "Connect to Twenty"
-msgstr "Connect to Twenty"
+msgid "Connect to CRM"
+msgstr "Connect to CRM"
 
 #. js-lingui-explicit-id
 #: src/emails/password-reset-link.email.tsx
@@ -165,8 +165,8 @@ msgstr "All data in this workspace has been permanently deleted."
 
 #. js-lingui-explicit-id
 #: src/emails/clean-suspended-workspace.email.tsx
-msgid "If you wish to use Twenty again, you can create a new workspace."
-msgstr "If you wish to use Twenty again, you can create a new workspace."
+msgid "If you wish to use CRM again, you can create a new workspace."
+msgstr "If you wish to use CRM again, you can create a new workspace."
 
 #. js-lingui-explicit-id
 #: src/emails/clean-suspended-workspace.email.tsx
@@ -175,8 +175,8 @@ msgstr "Create a new workspace"
 
 #. js-lingui-explicit-id
 #: src/components/WhatIsTwenty.tsx
-msgid "What is Twenty?"
-msgstr "What is Twenty?"
+msgid "What is CRM?"
+msgstr "What is CRM?"
 
 #. js-lingui-explicit-id
 #: src/components/WhatIsTwenty.tsx
@@ -190,8 +190,8 @@ msgstr "Website"
 
 #. js-lingui-explicit-id
 #: src/components/Footer.tsx
-msgid "Visit Twenty's website"
-msgstr "Visit Twenty's website"
+msgid "Visit CRM website"
+msgstr "Visit CRM website"
 
 #. js-lingui-explicit-id
 #: src/components/Footer.tsx
@@ -200,8 +200,8 @@ msgstr "Github"
 
 #. js-lingui-explicit-id
 #: src/components/Footer.tsx
-msgid "Visit Twenty's GitHub repository"
-msgstr "Visit Twenty's GitHub repository"
+msgid "Visit GitHub repository"
+msgstr "Visit GitHub repository"
 
 #. js-lingui-explicit-id
 #: src/components/Footer.tsx
@@ -210,8 +210,8 @@ msgstr "User guide"
 
 #. js-lingui-explicit-id
 #: src/components/Footer.tsx
-msgid "Read Twenty's user guide"
-msgstr "Read Twenty's user guide"
+msgid "Read the user guide"
+msgstr "Read the user guide"
 
 #. js-lingui-explicit-id
 #: src/components/Footer.tsx
@@ -220,13 +220,13 @@ msgstr "Developers"
 
 #. js-lingui-explicit-id
 #: src/components/Footer.tsx
-msgid "Visit Twenty's developer documentation"
-msgstr "Visit Twenty's developer documentation"
+msgid "Visit developer documentation"
+msgstr "Visit developer documentation"
 
 #. js-lingui-explicit-id
 #: src/components/Footer.tsx
-msgid "Twenty.com, Public Benefit Corporation"
-msgstr "Twenty.com, Public Benefit Corporation"
+msgid "CRM"
+msgstr "CRM"
 
 #. js-lingui-explicit-id
 #: src/components/Footer.tsx
