@@ -127,7 +127,7 @@ export const SettingsCommunity = () => {
         <Section>
           <H2Title
             title={t`Partners`}
-            description={t`Hire a partner to help you implement and customize Twenty.`}
+            description={t`Hire a partner to help you implement and customize CRM.`}
           />
           <StyledCardLink
             href="https://twenty.com/partners/list"
