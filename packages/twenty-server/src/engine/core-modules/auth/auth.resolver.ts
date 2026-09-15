@@ -36,6 +36,7 @@ import { GetAuthorizationUrlForSSOInput } from 'src/engine/core-modules/auth/dto
 import { InvalidatePasswordDTO } from 'src/engine/core-modules/auth/dto/invalidate-password.dto';
 import { SignUpDTO } from 'src/engine/core-modules/auth/dto/sign-up.dto';
 import { TransientTokenDTO } from 'src/engine/core-modules/auth/dto/transient-token.dto';
+import { AdminSetUserPasswordInput } from 'src/engine/core-modules/auth/dto/admin-set-user-password.input';
 import { UpdatePasswordViaResetTokenInput } from 'src/engine/core-modules/auth/dto/update-password-via-reset-token.input';
 import { ValidatePasswordResetTokenDTO } from 'src/engine/core-modules/auth/dto/validate-password-reset-token.dto';
 import { ValidatePasswordResetTokenInput } from 'src/engine/core-modules/auth/dto/validate-password-reset-token.input';
@@ -929,6 +930,57 @@ export class AuthResolver {
   ): Promise<ValidatePasswordResetTokenDTO> {
     return this.resetPasswordService.validatePasswordResetToken(
       args.passwordResetToken,
+    );
+  }
+
+  /**
+   * Provision-admin only. Used by Admin Management to look up a CRM login
+   * before sending an Intelli Verse X OTP. Does not send mail.
+   */
+  @Query(() => Boolean)
+  @UseGuards(UserAuthGuard, NoPermissionGuard)
+  async adminUserExists(
+    @AuthUser() caller: AuthContextUser,
+    @Args('email') email: string,
+  ): Promise<boolean> {
+    this.assertProvisionCaller(caller);
+    const user = await this.userService.findUserByEmail(
+      String(email || '')
+        .trim()
+        .toLowerCase(),
+    );
+
+    return isDefined(user);
+  }
+
+  /**
+   * Provision-admin only. Sets the CRM password after the portal OTP
+   * succeeds. Existing public reset-token mutations are unchanged.
+   */
+  @Mutation(() => InvalidatePasswordDTO)
+  @UseGuards(UserAuthGuard, NoPermissionGuard)
+  async adminSetUserPassword(
+    @AuthUser() caller: AuthContextUser,
+    @Args() input: AdminSetUserPasswordInput,
+  ): Promise<InvalidatePasswordDTO> {
+    this.assertProvisionCaller(caller);
+    const user = await this.userService.findUserByEmailOrThrow(
+      input.email.trim().toLowerCase(),
+    );
+
+    await this.authService.updatePassword(user.id, input.newPassword);
+
+    return { success: true };
+  }
+
+  private assertProvisionCaller(caller: AuthContextUser): void {
+    if (caller.canImpersonate || caller.canAccessFullAdminPanel) {
+      return;
+    }
+
+    throw new AuthException(
+      'Only a CRM provision admin can set a user password',
+      AuthExceptionCode.FORBIDDEN_EXCEPTION,
     );
   }
 }
