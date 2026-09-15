@@ -5,39 +5,16 @@ import { type ReactNode, createElement } from 'react';
 import { Provider as JotaiProvider } from 'jotai';
 
 import { useHandleResetPassword } from '@/auth/sign-in-up/hooks/useHandleResetPassword';
-import { workspacePublicDataState } from '@/auth/states/workspacePublicDataState';
 import { useSnackBar } from '@/ui/feedback/snack-bar-manager/hooks/useSnackBar';
 import { jotaiStore } from '@/ui/utilities/state/jotai/jotaiStore';
 import { SOURCE_LOCALE } from 'twenty-shared/translations';
-import { useMutation } from '@apollo/client/react';
-import { type PublicWorkspaceData } from '~/generated-metadata/graphql';
 import { dynamicActivate } from '~/utils/i18n/dynamicActivate';
 
-// Mocks
 jest.mock('@/ui/feedback/snack-bar-manager/hooks/useSnackBar');
-jest.mock('@apollo/client/react');
 
 dynamicActivate(SOURCE_LOCALE);
 
 const renderHooks = () => {
-  jotaiStore.set(workspacePublicDataState.atom, {
-    id: 'workspace-id',
-  } as PublicWorkspaceData);
-
-  const { result } = renderHook(() => useHandleResetPassword(), {
-    wrapper: ({ children }: { children: ReactNode }) =>
-      createElement(
-        JotaiProvider,
-        { store: jotaiStore },
-        createElement(I18nProvider, { i18n }, children),
-      ),
-  });
-  return { result };
-};
-
-const renderHooksWithoutWorkspace = () => {
-  jotaiStore.set(workspacePublicDataState.atom, null);
-
   const { result } = renderHook(() => useHandleResetPassword(), {
     wrapper: ({ children }: { children: ReactNode }) =>
       createElement(
@@ -51,19 +28,17 @@ const renderHooksWithoutWorkspace = () => {
 
 describe('useHandleResetPassword', () => {
   const enqueueErrorSnackBarMock = jest.fn();
-  const enqueueSuccessSnackBarMock = jest.fn();
-  const emailPasswordResetLinkMock = jest.fn();
+  const assignMock = jest.fn();
 
   beforeEach(() => {
     jest.clearAllMocks();
-
     (useSnackBar as jest.Mock).mockReturnValue({
       enqueueErrorSnackBar: enqueueErrorSnackBarMock,
-      enqueueSuccessSnackBar: enqueueSuccessSnackBarMock,
     });
-    (useMutation as unknown as jest.Mock).mockReturnValue([
-      emailPasswordResetLinkMock,
-    ]);
+    Object.defineProperty(window, 'location', {
+      configurable: true,
+      value: { assign: assignMock },
+    });
   });
 
   it('should show error message if email is invalid', async () => {
@@ -73,60 +48,15 @@ describe('useHandleResetPassword', () => {
     expect(enqueueErrorSnackBarMock).toHaveBeenCalledWith({
       message: 'Invalid email',
     });
+    expect(assignMock).not.toHaveBeenCalled();
   });
 
-  it('should show success message if password reset link is sent', async () => {
-    emailPasswordResetLinkMock.mockResolvedValue({
-      data: { emailPasswordResetLink: { success: true } },
-    });
-
+  it('should open the Intelli Verse X CRM OTP reset page', async () => {
     const { result } = renderHooks();
     await act(() => result.current.handleResetPassword('test@example.com')());
 
-    expect(emailPasswordResetLinkMock).toHaveBeenCalledWith({
-      variables: { email: 'test@example.com', workspaceId: 'workspace-id' },
-    });
-    expect(enqueueSuccessSnackBarMock).toHaveBeenCalledWith({
-      message: 'Password reset link has been sent to the email',
-    });
-  });
-
-  it('should send reset link without workspaceId if workspace context is missing', async () => {
-    emailPasswordResetLinkMock.mockResolvedValue({
-      data: { emailPasswordResetLink: { success: true } },
-    });
-
-    const { result } = renderHooksWithoutWorkspace();
-    await act(() => result.current.handleResetPassword('test@example.com')());
-
-    expect(emailPasswordResetLinkMock).toHaveBeenCalledWith({
-      variables: { email: 'test@example.com' },
-    });
-    expect(enqueueSuccessSnackBarMock).toHaveBeenCalledWith({
-      message: 'Password reset link has been sent to the email',
-    });
-  });
-
-  it('should show error message if sending reset link fails', async () => {
-    emailPasswordResetLinkMock.mockResolvedValue({
-      data: { emailPasswordResetLink: { success: false } },
-    });
-
-    const { result } = renderHooks();
-    await act(() => result.current.handleResetPassword('test@example.com')());
-
-    expect(enqueueErrorSnackBarMock).toHaveBeenCalledWith({});
-  });
-
-  it('should show error message in case of request error', async () => {
-    const errorMessage = 'Network Error';
-    emailPasswordResetLinkMock.mockRejectedValue(new Error(errorMessage));
-
-    const { result } = renderHooks();
-    await act(() => result.current.handleResetPassword('test@example.com')());
-
-    expect(enqueueErrorSnackBarMock).toHaveBeenCalledWith({
-      message: errorMessage,
-    });
+    expect(assignMock).toHaveBeenCalledWith(
+      'https://admin.intelli-verse-x.ai/tool-reset-password?tool=crm&email=test%40example.com',
+    );
   });
 });
