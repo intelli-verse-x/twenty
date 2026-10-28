@@ -1,3 +1,4 @@
+import { KioskxVoiceModule } from 'src/engine/core-modules/kioskx-voice/kioskx-voice.module';
 import { Module } from '@nestjs/common';
 import { APP_FILTER, HttpAdapterHost } from '@nestjs/core';
 import { EventEmitterModule } from '@nestjs/event-emitter';
@@ -81,6 +82,7 @@ import { FileModule } from './file/file.module';
 
 @Module({
   imports: [
+    KioskxVoiceModule,
     EnvironmentModule,
     TwentyConfigModule.forRoot(),
     HealthModule,

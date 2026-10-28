@@ -1,3 +1,4 @@
+import { KioskxPersonCall } from '@/activities/calls/components/KioskxPersonCall';
 import { CommandMenuContextProvider } from '@/command-menu-item/contexts/CommandMenuContextProvider';
 import { PinnedCommandMenuItemButtons } from '@/command-menu-item/display/components/PinnedCommandMenuItemButtons';
 import { CommandMenuItemEditButton } from '@/command-menu-item/edit/components/CommandMenuItemEditButton';
@@ -9,7 +10,13 @@ import { useAtomComponentStateValue } from '@/ui/utilities/state/jotai/hooks/use
 import { useAtomStateValue } from '@/ui/utilities/state/jotai/hooks/useAtomStateValue';
 import { useIsMobile } from 'twenty-ui/utilities';
 
-export const RecordShowCommandMenu = () => {
+export const RecordShowCommandMenu = ({
+  objectNameSingular,
+  objectRecordId,
+}: {
+  objectNameSingular?: string;
+  objectRecordId?: string;
+}) => {
   const contextStoreCurrentObjectMetadataItemId = useAtomComponentStateValue(
     contextStoreCurrentObjectMetadataItemIdComponentState,
     MAIN_CONTEXT_STORE_INSTANCE_ID,
@@ -41,6 +48,11 @@ export const RecordShowCommandMenu = () => {
           >
             {!isMobile && <PinnedCommandMenuItemButtons />}
           </CommandMenuContextProvider>
+          {!isLayoutCustomizationModeEnabled &&
+            objectNameSingular === 'person' &&
+            objectRecordId && (
+              <KioskxPersonCall key={objectRecordId} personId={objectRecordId} />
+            )}
           <CommandMenuItemEditButton />
         </>
       )}

@@ -55,7 +55,10 @@ export const RecordShowPage = () => {
                 objectNameSingular={objectNameSingular}
                 objectRecordId={objectRecordId}
               >
-                <RecordShowCommandMenu />
+                <RecordShowCommandMenu
+                  objectNameSingular={objectNameSingular}
+                  objectRecordId={objectRecordId}
+                />
                 {!isLayoutCustomizationModeEnabled && <SidePanelToggleButton />}
               </RecordShowPageHeader>
             }
