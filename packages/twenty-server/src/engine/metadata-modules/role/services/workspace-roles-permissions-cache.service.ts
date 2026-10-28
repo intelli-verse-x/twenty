@@ -14,6 +14,7 @@ import {
 import { isDefined } from 'twenty-shared/utils';
 import { IsNull, Repository } from 'typeorm';
 
+import { isKioskxDeskRawObject } from 'src/modules/kioskx-hired-mask/kioskx-desk-policy';
 import { WorkspaceCacheProvider } from 'src/engine/workspace-cache/interfaces/workspace-cache-provider.service';
 
 import { ObjectMetadataEntity } from 'src/engine/metadata-modules/object-metadata/object-metadata.entity';
@@ -225,6 +226,19 @@ export class WorkspaceRolesPermissionsCacheService extends WorkspaceCacheProvide
           }
         }
 
+        if (
+          isKioskxDeskRawObject(
+            workspaceId,
+            role.id,
+            objectMetadata.nameSingular,
+          )
+        ) {
+          canRead = false;
+          canUpdate = false;
+          canSoftDelete = false;
+          canDestroy = false;
+        }
+
         objectRecordsPermissions[objectMetadataId] = {
           canReadObjectRecords: canRead,
           canUpdateObjectRecords: canUpdate,
@@ -260,6 +274,7 @@ export class WorkspaceRolesPermissionsCacheService extends WorkspaceCacheProvide
       select: [
         'id',
         'isSystem',
+        'nameSingular',
         'universalIdentifier',
         'labelIdentifierFieldMetadataId',
       ],

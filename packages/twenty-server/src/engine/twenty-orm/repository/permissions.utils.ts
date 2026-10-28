@@ -8,6 +8,11 @@ import {
 import { isDefined } from 'twenty-shared/utils';
 import { type QueryExpressionMap } from 'typeorm/query-builder/QueryExpressionMap';
 
+import {
+  KIOSKX_DESK_ROLE_ID,
+  isKioskxDeskRawObject,
+} from 'src/modules/kioskx-hired-mask/kioskx-desk-policy';
+import { workspaceContextStorage } from 'src/engine/twenty-orm/storage/orm-workspace-context.storage';
 import { ProcessAggregateHelper } from 'src/engine/api/graphql/graphql-query-runner/helpers/process-aggregate.helper';
 import { InternalServerError } from 'src/engine/core-modules/graphql/utils/graphql-errors.util';
 import { type FlatEntityMaps } from 'src/engine/metadata-modules/flat-entity/types/flat-entity-maps.type';
@@ -107,6 +112,23 @@ export const validateOperationIsPermittedOrThrow = ({
   });
 
   if (!isDefined(objectMetadata)) {
+    throw new PermissionsException(
+      PermissionsExceptionMessage.PERMISSION_DENIED,
+      PermissionsExceptionCode.PERMISSION_DENIED,
+    );
+  }
+
+  const context = workspaceContextStorage.getStore();
+  if (
+    context?.authContext.type === 'user' &&
+    context.userWorkspaceRoleMap[context.authContext.userWorkspaceId] ===
+      KIOSKX_DESK_ROLE_ID &&
+    isKioskxDeskRawObject(
+      context.authContext.workspace.id,
+      KIOSKX_DESK_ROLE_ID,
+      entityName,
+    )
+  ) {
     throw new PermissionsException(
       PermissionsExceptionMessage.PERMISSION_DENIED,
       PermissionsExceptionCode.PERMISSION_DENIED,

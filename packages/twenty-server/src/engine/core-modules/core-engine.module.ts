@@ -74,6 +74,7 @@ import { TrashCleanupModule } from 'src/engine/trash-cleanup/trash-cleanup.modul
 import { WorkspaceEventEmitterModule } from 'src/engine/workspace-event-emitter/workspace-event-emitter.module';
 import { ChannelSyncModule } from 'src/modules/connected-account/channel-sync/channel-sync.module';
 import { DashboardModule } from 'src/modules/dashboard/dashboard.module';
+import { KioskxHiredMaskModule } from 'src/modules/kioskx-hired-mask/kioskx-hired-mask.module';
 import { SendEmailModule } from 'src/modules/messaging/message-outbound-manager/send-email.module';
 import { ClientConfigModule } from './client-config/client-config.module';
 import { EventLogsViewerModule } from './event-logs/event-logs-viewer.module';
@@ -128,6 +129,7 @@ import { FileModule } from './file/file.module';
     ImapSmtpCaldavModule,
     ChannelSyncModule,
     SendEmailModule,
+    KioskxHiredMaskModule,
     FileStorageModule.forRoot(),
     LoggerModule.forRootAsync({
       useFactory: loggerModuleFactory,

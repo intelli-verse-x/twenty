@@ -1,3 +1,4 @@
+import { KioskxHiredContact } from '@/kioskx-hired-mask/KioskxHiredContact';
 import { useParams } from 'react-router-dom';
 
 import { SidePanelToggleButton } from '@/side-panel/components/SidePanelToggleButton';
@@ -65,6 +66,12 @@ export const RecordShowPage = () => {
                 recordId: objectRecordId,
               }}
             >
+              {objectNameSingular === 'person' && (
+                <KioskxHiredContact
+                  key={objectRecordId}
+                  personId={objectRecordId}
+                />
+              )}
               <PageLayoutRecordPageRenderer
                 targetRecordIdentifier={{
                   id: objectRecordId,
