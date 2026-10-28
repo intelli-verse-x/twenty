@@ -110,4 +110,13 @@ describe('KioskX call outcome', () => {
     expect(state().status).toBe('complete');
     expect(ports.create).toHaveBeenCalledTimes(1);
   });
+  it('reports a failed save honestly when a transcript was returned', async () => {
+    const { ports, state } = makeCall();
+    ports.note.mockRejectedValue(new Error('database unavailable'));
+    await advanceCall(ports);
+    for (let i = 0; i < 6; i++) await advanceCall(ports);
+    expect(state().status).toBe('failed');
+    expect(state().message).toContain('Transcript could not be saved');
+    expect(ports.create).toHaveBeenCalledTimes(1);
+  });
 });

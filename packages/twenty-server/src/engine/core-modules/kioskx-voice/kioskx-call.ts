@@ -58,6 +58,8 @@ export async function advanceCall(ports: CallPorts) {
     return;
   }
   state.attempts += 1;
+  let receivedTranscript = false;
+  let readOrSaveFailed = false;
   try {
     const result = await ports.read(state.callId);
     if (result.failed) {
@@ -68,6 +70,7 @@ export async function advanceCall(ports: CallPorts) {
     }
     if (result.ended) state.endedReads = (state.endedReads || 0) + 1;
     if (result.ended && result.transcript?.trim()) {
+      receivedTranscript = true;
       await ports.note(state.operationId, state.personId, result.transcript);
       state.status = 'complete';
       state.message = 'Transcript saved as KioskX call.';
@@ -75,11 +78,16 @@ export async function advanceCall(ports: CallPorts) {
       return;
     }
   } catch {
+    readOrSaveFailed = true;
     // Read/persistence failures may be retried; create-call may not.
   }
   if (state.attempts >= 120 || (state.endedReads || 0) >= 6) {
     state.status = 'failed';
-    state.message = 'No transcript returned. Check Voice Studio.';
+    state.message = receivedTranscript
+      ? 'Transcript could not be saved. Check Voice Studio.'
+      : readOrSaveFailed
+        ? 'Call status unavailable. Check Voice Studio.'
+        : 'No transcript returned. Check Voice Studio.';
   }
   await ports.save(state);
   if (state.status === 'pending') await ports.schedule();
