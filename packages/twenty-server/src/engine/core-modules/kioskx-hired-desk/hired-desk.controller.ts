@@ -20,7 +20,9 @@ export class HiredDeskController {
     private readonly desk: HiredDeskService,
   ) {}
   private async authorize(request: Request) {
-    const identity = await this.tokens.validateTokenByRequest(request);
+    const token = ExtractJwt.fromAuthHeaderAsBearerToken()(request);
+    if (!token) throw new ForbiddenException();
+    const identity = await this.tokens.validateToken(token);
     if (!isHiredDesk(identity)) throw new ForbiddenException();
   }
   @Get('session')

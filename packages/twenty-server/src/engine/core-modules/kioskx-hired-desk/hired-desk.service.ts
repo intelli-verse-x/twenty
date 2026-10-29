@@ -47,22 +47,20 @@ export class HiredDeskService {
       buildSystemAuthContext(HIRED_WORKSPACE),
     );
   }
+  private repo<T>(name: 'note' | 'noteTarget' | 'person') {
+    return this.orm.getRepository<T>(HIRED_WORKSPACE, name, {
+      shouldBypassPermissionChecks: true,
+    });
+  }
   private async records() {
-    const notes = await this.orm.getRepository(
-      HIRED_WORKSPACE,
-      NoteWorkspaceEntity,
-    );
-    const targets = await this.orm.getRepository(
-      HIRED_WORKSPACE,
-      NoteTargetWorkspaceEntity,
-    );
-    const people = await this.orm.getRepository(
-      HIRED_WORKSPACE,
-      PersonWorkspaceEntity,
-    );
+    const notes = await this.repo<NoteWorkspaceEntity>('note');
+    const targets = await this.repo<NoteTargetWorkspaceEntity>('noteTarget');
+    const people = await this.repo<PersonWorkspaceEntity>('person');
     // Provenance is the existing linked form note, not membership in People.
     const forms = await notes.find({
-      where: { title: 'KioskX contact form' },
+      where: {
+        title: In(['KioskX contact form', 'KioskX newsletter']),
+      },
       order: { createdAt: 'DESC' },
     });
     if (!forms.length) return [];
@@ -115,7 +113,10 @@ export class HiredDeskService {
           canCall: this.voiceOn() && !!this.destination(person),
         })),
       }));
-    } catch {
+    } catch (error) {
+      const code =
+        error instanceof Error ? error.name : typeof error === 'string' ? 'Error' : 'unknown';
+      console.error(`HiredDeskService.leads failed: ${code}`);
       return { unavailable: true, leads: [] };
     }
   }
@@ -128,14 +129,8 @@ export class HiredDeskService {
         );
         const destination = record && this.destination(record.person);
         if (!destination) return { status: 'unavailable' };
-        const notes = await this.orm.getRepository(
-          HIRED_WORKSPACE,
-          NoteWorkspaceEntity,
-        );
-        const targets = await this.orm.getRepository(
-          HIRED_WORKSPACE,
-          NoteTargetWorkspaceEntity,
-        );
+        const notes = await this.repo<NoteWorkspaceEntity>('note');
+        const targets = await this.repo<NoteTargetWorkspaceEntity>('noteTarget');
         const hash = createHash('sha256')
           .update(`${HIRED_WORKSPACE}:${leadId}:${requestId}`)
           .digest('hex');
