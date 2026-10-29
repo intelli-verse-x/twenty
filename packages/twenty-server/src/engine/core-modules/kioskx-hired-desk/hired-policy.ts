@@ -27,6 +27,7 @@ export const hiredRequestAllowed = (
       ['/kioskx-hired-desk/session', '/kioskx-hired-desk/leads'].includes(
         path,
       )) ||
-    (request.method === 'POST' && path === '/kioskx-hired-desk/call')
+    (request.method === 'POST' &&
+      ['/kioskx-hired-desk/call', '/kioskx-hired-desk/email'].includes(path))
   );
 };
