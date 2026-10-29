@@ -8,8 +8,10 @@ const lead = {
   label: 'Inquiry safe-label',
   inquiry: 'I want a cabinet.',
   canCall: false,
+  email: 'lead@example.test',
+  phone: '+1 2025550123',
 };
-it('renders the safe inquiry without contacts, other CRM sections, or Call', async () => {
+it('renders contact cards with a disabled Call and no other CRM sections', async () => {
   const request = jest.fn(async () => ({ unavailable: false, leads: [lead] }));
   const { container } = render(
     <HiredDesk request={request} onSignOut={jest.fn()} />,
@@ -18,8 +20,6 @@ it('renders the safe inquiry without contacts, other CRM sections, or Call', asy
   expect(screen.getByText('I want a cabinet.')).toBeInTheDocument();
   for (const hidden of [
     'Non-form person',
-    'lead@example.test',
-    '2025550123',
     'mailto:',
     'tel:',
     'Companies',
@@ -29,9 +29,11 @@ it('renders the safe inquiry without contacts, other CRM sections, or Call', asy
     'Notes',
   ])
     expect(container.innerHTML).not.toContain(hidden);
-  expect(
-    screen.queryByRole('button', { name: 'Call' }),
-  ).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Call' })).toBeDisabled();
+  expect(screen.getByText('Email')).toBeInTheDocument();
+  expect(screen.getByText('Phone')).toBeInTheDocument();
+  expect(screen.getByText(lead.email)).toBeInTheDocument();
+  expect(screen.getByText(lead.phone)).toBeInTheDocument();
 });
 it('sends only opaque IDs for an enabled call, never a destination', async () => {
   const request = jest.fn(async (path) =>
@@ -62,9 +64,36 @@ it.each(['rejected', 'unavailable'])(
         'Inquiries are unavailable',
       ),
     );
+    expect(
+      screen.getByRole('button', { name: 'Sign out' }),
+    ).toBeInTheDocument();
     expect(screen.queryByText(lead.label)).not.toBeInTheDocument();
     expect(
       screen.queryByRole('button', { name: 'Call' }),
     ).not.toBeInTheDocument();
   },
 );
+
+it('keeps missing contact rows and separates pipe-delimited form lines', async () => {
+  const request = jest.fn(async () => ({
+    leads: [
+      {
+        ...lead,
+        email: '',
+        phone: '',
+        inquiry: '|City / State: Austin, TX|Message: Hello|',
+      },
+    ],
+  }));
+  const { container } = render(
+    <HiredDesk request={request} onSignOut={jest.fn()} />,
+  );
+  await screen.findByText('No email');
+  expect(screen.getByText('No phone')).toBeInTheDocument();
+  expect(screen.getByText('Email')).toBeInTheDocument();
+  expect(screen.getByText('Phone')).toBeInTheDocument();
+  expect(screen.getByText('City / State: Austin, TX')).toBeInTheDocument();
+  expect(screen.getByText('Message: Hello')).toBeInTheDocument();
+  expect(container.textContent).not.toContain('|');
+  expect(screen.getByRole('button', { name: 'Call' })).toBeDisabled();
+});
