@@ -3,7 +3,6 @@ import { tokenPairState } from '@/auth/states/tokenPairState';
 import { useSetAtomState } from '@/ui/utilities/state/jotai/hooks/useSetAtomState';
 import { useAtomStateValue } from '@/ui/utilities/state/jotai/hooks/useAtomStateValue';
 import { clearSessionLocalStorageKeys } from '@/auth/utils/clearSessionLocalStorageKeys';
-import { REACT_APP_SERVER_BASE_URL } from '~/config';
 import { HiredDesk } from './HiredDesk';
 
 // Resolve the server's identity before mounting any CRM data providers or routes.
@@ -17,7 +16,7 @@ export const HiredDeskBoundary = ({ children }: { children: ReactNode }) => {
   const request = useCallback(
     async (path: string, body?: unknown) => {
       const response = await fetch(
-        `${REACT_APP_SERVER_BASE_URL}/kioskx-hired-desk/${path}`,
+        `${window.location.origin}/kioskx-hired-desk/${path}`,
         {
           method: body === undefined ? 'GET' : 'POST',
           headers: {

@@ -13,7 +13,15 @@ export const hiredRequestAllowed = (
   request: { method: string; originalUrl?: string; url?: string },
 ) => {
   if (!isHiredDesk(identity)) return true;
-  const path = (request.originalUrl ?? request.url ?? '').split('?')[0];
+  let path: string;
+  try {
+    path = new URL(
+      request.originalUrl ?? request.url ?? '',
+      'http://desk.local',
+    ).pathname;
+  } catch {
+    return false;
+  }
   return (
     (request.method === 'GET' &&
       ['/kioskx-hired-desk/session', '/kioskx-hired-desk/leads'].includes(

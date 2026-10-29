@@ -210,3 +210,16 @@ it('allows only desk endpoint methods and keeps other workspaces unchanged', () 
     ),
   ).toBe(true);
 });
+
+it.each([
+  ['GET', 'session'], ['GET', 'leads'], ['POST', 'call'],
+])('accepts full originalUrl for %s %s', (method, endpoint) => {
+  expect(hiredRequestAllowed(identity, {
+    method, originalUrl: `https://kioskx.crm.intelli-verse-x.ai/kioskx-hired-desk/${endpoint}?test=1`,
+  })).toBe(true);
+});
+it('blocks non-desk full URLs and malformed URLs', () => {
+  for (const originalUrl of ['https://kioskx.crm.intelli-verse-x.ai/rest/people', 'http://[invalid']) {
+    expect(hiredRequestAllowed(identity, { method: 'GET', originalUrl })).toBe(false);
+  }
+});
