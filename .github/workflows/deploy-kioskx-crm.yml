@@ -1,0 +1,18 @@
+name: Deploy KioskX CRM
+on:
+  push:
+    branches: [main]
+permissions:
+  contents: read
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch official v2.18.5 plus this KioskX overlay
+        env:
+          GH_TOKEN: ${{ secrets.GH_PAT }}
+          TWENTY_SHA: ${{ github.sha }}
+        run: |
+          gh workflow run twenty-build.yml \
+            --repo intelli-verse-x/intelli-verse-kube-infra \
+            --ref main -f ref="$TWENTY_SHA"
