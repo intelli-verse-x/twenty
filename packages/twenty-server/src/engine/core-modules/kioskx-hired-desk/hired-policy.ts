@@ -1,0 +1,24 @@
+export const HIRED_WORKSPACE = '243e9c93-f7f9-47cc-ab7d-6a7dd6659774';
+export type DeskIdentity = {
+  user?: { email: string } | null;
+  workspace?: { id: string };
+};
+export const isHiredDesk = (identity: DeskIdentity) =>
+  identity.workspace?.id === HIRED_WORKSPACE &&
+  identity.user?.email.toLowerCase() === 'support@kiosk-x.ai';
+
+// Applied after token verification, independent of host, client routes and role grants.
+export const hiredRequestAllowed = (
+  identity: DeskIdentity,
+  request: { method: string; originalUrl?: string; url?: string },
+) => {
+  if (!isHiredDesk(identity)) return true;
+  const path = (request.originalUrl ?? request.url ?? '').split('?')[0];
+  return (
+    (request.method === 'GET' &&
+      ['/kioskx-hired-desk/session', '/kioskx-hired-desk/leads'].includes(
+        path,
+      )) ||
+    (request.method === 'POST' && path === '/kioskx-hired-desk/call')
+  );
+};

@@ -1,3 +1,4 @@
+import { hiredRequestAllowed } from 'src/engine/core-modules/kioskx-hired-desk/hired-policy';
 import { Injectable } from '@nestjs/common';
 import { InjectRepository } from '@nestjs/typeorm';
 
@@ -201,6 +202,13 @@ export class AccessTokenService {
       );
     }
 
-    return this.validateToken(token);
+    const context = await this.validateToken(token);
+    if (!hiredRequestAllowed(context, request)) {
+      throw new AuthException(
+        'This account uses the lead desk.',
+        AuthExceptionCode.FORBIDDEN_EXCEPTION,
+      );
+    }
+    return context;
   }
 }
