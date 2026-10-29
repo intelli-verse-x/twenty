@@ -1,3 +1,4 @@
+import { isHiredSession } from '@/kioskx-hired-desk/hired-session';
 import {
   useApolloClient,
   useLazyQuery,
@@ -276,7 +277,11 @@ export const useAuth = () => {
 
   const handleLoadWorkspaceAfterAuthentication = useCallback(
     async (authTokens: AuthTokenPair) => {
+      const hired = await isHiredSession(
+        authTokens.accessOrWorkspaceAgnosticToken.token,
+      );
       handleSetAuthTokens(authTokens);
+      if (hired) return;
       setIsAppEffectRedirectEnabled(false);
 
       await loadCurrentUser();
@@ -349,7 +354,11 @@ export const useAuth = () => {
       await signIn({
         variables: { email, password, captchaToken },
         onCompleted: async (data) => {
+          const hired = await isHiredSession(
+            data.signIn.tokens.accessOrWorkspaceAgnosticToken.token,
+          );
           handleSetAuthTokens(data.signIn.tokens);
+          if (hired) return;
           const { user } = await loadCurrentUser();
 
           await navigateAfterMultiWorkspaceSignInUp(

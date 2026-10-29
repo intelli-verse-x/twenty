@@ -1,3 +1,4 @@
+import { HiredDeskBoundary } from '@/kioskx-hired-desk/HiredDeskBoundary';
 import { AgentChatProvider } from '@/ai/components/AgentChatProvider';
 import { ApolloProvider } from '@/apollo/components/ApolloProvider';
 import { CommandMenuConfirmationModalManager } from '@/command-menu-item/confirmation-modal/components/CommandMenuConfirmationModalManager';
@@ -37,7 +38,7 @@ import { StrictMode } from 'react';
 import { Outlet, useLocation } from 'react-router-dom';
 import { getPageTitleFromPath } from '~/utils/title-utils';
 
-export const AppRouterProviders = () => {
+const CrmRouterProviders = () => {
   const { pathname } = useLocation();
   const pageTitle = getPageTitleFromPath(pathname);
 
@@ -96,3 +97,9 @@ export const AppRouterProviders = () => {
     </ApolloProvider>
   );
 };
+
+export const AppRouterProviders = () => (
+  <HiredDeskBoundary>
+    <CrmRouterProviders />
+  </HiredDeskBoundary>
+);
