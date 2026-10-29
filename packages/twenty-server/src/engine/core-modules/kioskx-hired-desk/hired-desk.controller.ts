@@ -8,6 +8,7 @@ import {
   ForbiddenException,
 } from '@nestjs/common';
 import { type Request } from 'express';
+import { ExtractJwt } from 'passport-jwt';
 import { AccessTokenService } from 'src/engine/core-modules/auth/token/services/access-token.service';
 import { isHiredDesk } from './hired-policy';
 import { HiredDeskService } from './hired-desk.service';
@@ -25,9 +26,12 @@ export class HiredDeskController {
   @Get('session')
   @Header('Cache-Control', 'no-store')
   async session(@Req() request: Request) {
-    return {
-      hired: isHiredDesk(await this.tokens.validateTokenByRequest(request)),
-    };
+    const token = ExtractJwt.fromAuthHeaderAsBearerToken()(request);
+
+    if (!token) return { hired: false };
+
+    // Identity discovery must not depend on the hired endpoint allowlist.
+    return { hired: isHiredDesk(await this.tokens.validateToken(token)) };
   }
   @Get('leads')
   @Header('Cache-Control', 'no-store')

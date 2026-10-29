@@ -15,7 +15,7 @@ jest.mock('@/ui/utilities/state/jotai/hooks/useSetAtomState', () => ({
 jest.mock('@/auth/utils/clearSessionLocalStorageKeys', () => ({
   clearSessionLocalStorageKeys: jest.fn(),
 }));
-jest.mock('~/config', () => ({ REACT_APP_SERVER_BASE_URL: '' }));
+jest.mock('~/config', () => ({ REACT_APP_SERVER_BASE_URL: 'https://crm.intelli-verse-x.ai' }));
 const child = jest.fn(() => <div>People Companies Notes Workflows</div>);
 const Child = child;
 const reply = (body: unknown) => ({ ok: true, json: async () => body });
@@ -49,6 +49,13 @@ it('never mounts CRM providers while resolving or when hired; every deep link be
   );
   expect(child).not.toHaveBeenCalled();
   await screen.findByText('Inquiry fixture');
+  for (const path of ['session', 'leads'])
+    expect(global.fetch).toHaveBeenCalledWith(
+      `${window.location.origin}/kioskx-hired-desk/${path}`,
+      expect.any(Object),
+    );
+  expect(screen.queryByRole('button', { name: 'Call' })).not.toBeInTheDocument();
+  expect(screen.getByRole('button', { name: 'Sign out' })).toBeInTheDocument();
   expect(child).not.toHaveBeenCalled();
   expect(document.body.innerHTML).not.toContain('People');
 });
@@ -102,3 +109,14 @@ it('keeps login reachable without a session', () => {
   );
   expect(screen.getByText('Sign in')).toBeInTheDocument();
 });
+
+it.each([{}, { hired: null }, { hired: 'false' }])(
+  'keeps CRM hidden when hired cannot be read: %j',
+  async (value) => {
+    global.fetch = jest.fn(async () => reply(value)) as jest.Mock;
+    render(<HiredDeskBoundary><Child /></HiredDeskBoundary>);
+    await screen.findByText('Inquiries are unavailable. Sign in again to retry.');
+    expect(child).not.toHaveBeenCalled();
+    expect(screen.getByRole('button', { name: 'Sign out' })).toBeInTheDocument();
+  },
+);

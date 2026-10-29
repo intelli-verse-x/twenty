@@ -1,7 +1,6 @@
-import { REACT_APP_SERVER_BASE_URL } from '~/config';
 export const isHiredSession = async (token: string): Promise<boolean> => {
   const response = await fetch(
-    `${REACT_APP_SERVER_BASE_URL}/kioskx-hired-desk/session`,
+    `${window.location.origin}/kioskx-hired-desk/session`,
     {
       headers: { Authorization: `Bearer ${token}` },
       cache: 'no-store',
