@@ -66,12 +66,17 @@ const setup = (voice?: HiredGoogleVoice) => {
   };
   const orm = {
     executeInWorkspaceContext: jest.fn(async (fn) => fn()),
-    getRepository: jest.fn(
-      async (_workspace, entity) =>
-        ({ Person: people, Note: notes, NoteTarget: targets })[
-          entity.name as 'Person'
-        ],
-    ),
+    getRepository: jest.fn(async (_workspace, entity) => {
+      const key = typeof entity === 'string' ? entity : entity.name;
+      return {
+        note: notes,
+        noteTarget: targets,
+        person: people,
+        Note: notes,
+        NoteTarget: targets,
+        Person: people,
+      }[key];
+    }),
   };
   return {
     service: new HiredDeskService(
@@ -106,7 +111,13 @@ it.each([undefined, 'false', 'TRUE', '1'])(
     ])
       expect(JSON.stringify(result)).not.toContain(forbidden);
     expect(notes.find).toHaveBeenCalledWith(
-      expect.objectContaining({ where: { title: 'KioskX contact form' } }),
+      expect.objectContaining({
+        where: {
+          title: expect.objectContaining({
+            _value: ['KioskX contact form', 'KioskX newsletter'],
+          }),
+        },
+      }),
     );
     expect(people.find).toHaveBeenCalledWith({
       where: { id: expect.objectContaining({ _value: [id] }) },
