@@ -20,10 +20,10 @@ export const redactContactText = (value: string): string =>
     )
     .replace(/(?:mailto|tel):\S*/gi, '[contact removed]');
 
-export const inquiryText = (
+const formText = (
   body: { markdown?: string | null; blocknote?: string | null } | null,
 ): string => {
-  if (body?.markdown) return redactContactText(body.markdown);
+  if (body?.markdown) return body.markdown;
   if (!body?.blocknote) return '';
   try {
     const text = (node: unknown): string => {
@@ -42,8 +42,32 @@ export const inquiryText = (
         .filter(Boolean)
         .join(' ');
     };
-    return redactContactText(text(JSON.parse(body.blocknote)));
+    return text(JSON.parse(body.blocknote));
   } catch {
     return '';
   }
+};
+
+export const inquiryText = (body: Parameters<typeof formText>[0]): string =>
+  redactContactText(formText(body));
+
+// Only labeled contact fields from the linked form, never arbitrary numbers in prose.
+export const formContacts = (body: Parameters<typeof formText>[0]) => {
+  const text = convert(formText(body), { wordwrap: false });
+  const field = (label: string) =>
+    text
+      .match(
+        new RegExp(
+          `(?:^|[|\\n])\\s*(?:\\*\\*)?${label}(?:\\*\\*)?\\s*:\\s*([^|\\n]+)`,
+          'i',
+        ),
+      )?.[1]
+      ?.trim() ?? '';
+  return {
+    email:
+      field('email').match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i)?.[0] ?? '',
+    phone:
+      field('phone(?: number)?').match(/^\+?[0-9][0-9 ().-]{5,}[0-9]$/)?.[0] ??
+      '',
+  };
 };

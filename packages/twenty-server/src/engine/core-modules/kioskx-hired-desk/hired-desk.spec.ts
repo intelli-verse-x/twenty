@@ -101,14 +101,12 @@ it.each([undefined, 'false', 'TRUE', '1'])(
     expect(result.leads).toHaveLength(1);
     expect(result.leads[0].label).toMatch(/^Inquiry /);
     expect(result.leads[0].inquiry).toContain('I want a cabinet');
+    expect(result.leads[0].email).toBe(email);
+    expect(result.leads[0].phone).toBe('+1 ' + phone);
+    expect(result.leads[0].inquiry).not.toContain(email);
+    expect(result.leads[0].inquiry).not.toContain(phone);
     expect(result.leads[0].canCall).toBe(false);
-    for (const forbidden of [
-      email,
-      phone,
-      'mailto:',
-      'tel:',
-      'Non-form person',
-    ])
+    for (const forbidden of ['mailto:', 'tel:', 'Non-form person'])
       expect(JSON.stringify(result)).not.toContain(forbidden);
     expect(notes.find).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -223,14 +221,65 @@ it('allows only desk endpoint methods and keeps other workspaces unchanged', () 
 });
 
 it.each([
-  ['GET', 'session'], ['GET', 'leads'], ['POST', 'call'],
+  ['GET', 'session'],
+  ['GET', 'leads'],
+  ['POST', 'call'],
 ])('accepts full originalUrl for %s %s', (method, endpoint) => {
-  expect(hiredRequestAllowed(identity, {
-    method, originalUrl: `https://kioskx.crm.intelli-verse-x.ai/kioskx-hired-desk/${endpoint}?test=1`,
-  })).toBe(true);
+  expect(
+    hiredRequestAllowed(identity, {
+      method,
+      originalUrl: `https://kioskx.crm.intelli-verse-x.ai/kioskx-hired-desk/${endpoint}?test=1`,
+    }),
+  ).toBe(true);
 });
 it('blocks non-desk full URLs and malformed URLs', () => {
-  for (const originalUrl of ['https://kioskx.crm.intelli-verse-x.ai/rest/people', 'http://[invalid']) {
-    expect(hiredRequestAllowed(identity, { method: 'GET', originalUrl })).toBe(false);
+  for (const originalUrl of [
+    'https://kioskx.crm.intelli-verse-x.ai/rest/people',
+    'http://[invalid',
+  ]) {
+    expect(hiredRequestAllowed(identity, { method: 'GET', originalUrl })).toBe(
+      false,
+    );
   }
+});
+
+it.each(['KioskX contact form', 'KioskX newsletter'])(
+  'extracts labeled contacts from %s when person fields are empty',
+  async (title) => {
+    const { service, person, notes } = setup();
+    person.emails.primaryEmail = '';
+    person.phones.primaryPhoneNumber = '';
+    notes.find.mockResolvedValue([
+      {
+        id: 'form',
+        title,
+        bodyV2: {
+          markdown:
+            '|Email: note@example.test|Phone: +1 (202) 555-0145|City / State: Austin, TX|',
+        },
+      },
+    ]);
+    expect((await service.leads()).leads[0]).toMatchObject({
+      email: 'note@example.test',
+      phone: '+1 (202) 555-0145',
+      canCall: false,
+    });
+  },
+);
+it('returns empty first-class fields when both sources lack contacts', async () => {
+  const { service, person, notes } = setup();
+  person.emails.primaryEmail = '';
+  person.phones.primaryPhoneNumber = '';
+  notes.find.mockResolvedValue([
+    {
+      id: 'form',
+      title: 'KioskX newsletter',
+      bodyV2: { markdown: 'Newsletter signup' },
+    },
+  ]);
+  expect((await service.leads()).leads[0]).toMatchObject({
+    email: '',
+    phone: '',
+    canCall: false,
+  });
 });

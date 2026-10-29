@@ -7,7 +7,7 @@ import { PersonWorkspaceEntity } from 'src/modules/person/standard-objects/perso
 import { NoteWorkspaceEntity } from 'src/modules/note/standard-objects/note.workspace-entity';
 import { NoteTargetWorkspaceEntity } from 'src/modules/note/standard-objects/note-target.workspace-entity';
 import { HIRED_WORKSPACE } from './hired-policy';
-import { inquiryText } from './hired-redact';
+import { formContacts, inquiryText } from './hired-redact';
 
 export const HIRED_GOOGLE_VOICE = Symbol('HIRED_GOOGLE_VOICE');
 // No production provider is registered: no provisioned Google Voice forwarding
@@ -25,6 +25,8 @@ export type HiredLead = {
   id: string;
   label: string;
   inquiry: string;
+  email: string;
+  phone: string;
   canCall: boolean;
 };
 
@@ -82,8 +84,21 @@ export class HiredDeskService {
           .filter((link) => link.targetPersonId === person.id)
           .map((link) => link.noteId),
       );
+      const linkedForms = forms.filter((note) => noteIds.has(note.id));
+      const contacts = linkedForms.map((note) => formContacts(note.bodyV2));
+      const number = person.phones?.primaryPhoneNumber?.trim() ?? '';
+      const code = person.phones?.primaryPhoneCallingCode?.trim() ?? '';
       return {
         person,
+        email:
+          person.emails?.primaryEmail?.trim() ||
+          contacts.find((c) => c.email)?.email ||
+          '',
+        phone: number
+          ? number.startsWith('+') || !code
+            ? number
+            : `+${code.replace(/\D/g, '')} ${number}`
+          : contacts.find((c) => c.phone)?.phone || '',
         inquiry: forms
           .filter((note) => noteIds.has(note.id))
           .map((note) => inquiryText(note.bodyV2))
@@ -105,17 +120,25 @@ export class HiredDeskService {
     try {
       return await this.system(async () => ({
         unavailable: false,
-        leads: (await this.records()).map(({ person, inquiry }) => ({
-          id: person.id,
-          // A safe stable label cannot accidentally contain a name-field email/phone.
-          label: `Inquiry ${createHash('sha256').update(person.id).digest('hex').slice(0, 8)}`,
-          inquiry,
-          canCall: this.voiceOn() && !!this.destination(person),
-        })),
+        leads: (await this.records()).map(
+          ({ person, inquiry, email, phone }) => ({
+            id: person.id,
+            // A safe stable label cannot accidentally contain a name-field email/phone.
+            label: `Inquiry ${createHash('sha256').update(person.id).digest('hex').slice(0, 8)}`,
+            inquiry,
+            email,
+            phone,
+            canCall: this.voiceOn() && !!this.destination(person),
+          }),
+        ),
       }));
     } catch (error) {
       const code =
-        error instanceof Error ? error.name : typeof error === 'string' ? 'Error' : 'unknown';
+        error instanceof Error
+          ? error.name
+          : typeof error === 'string'
+            ? 'Error'
+            : 'unknown';
       console.error(`HiredDeskService.leads failed: ${code}`);
       return { unavailable: true, leads: [] };
     }
@@ -130,7 +153,8 @@ export class HiredDeskService {
         const destination = record && this.destination(record.person);
         if (!destination) return { status: 'unavailable' };
         const notes = await this.repo<NoteWorkspaceEntity>('note');
-        const targets = await this.repo<NoteTargetWorkspaceEntity>('noteTarget');
+        const targets =
+          await this.repo<NoteTargetWorkspaceEntity>('noteTarget');
         const hash = createHash('sha256')
           .update(`${HIRED_WORKSPACE}:${leadId}:${requestId}`)
           .digest('hex');
