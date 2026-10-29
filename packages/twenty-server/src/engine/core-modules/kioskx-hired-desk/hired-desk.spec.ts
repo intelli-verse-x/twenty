@@ -27,7 +27,10 @@ const identity = {
   user: { email: 'support@kiosk-x.ai' },
   workspace: { id: HIRED_WORKSPACE },
 };
-const setup = (voice?: HiredGoogleVoice) => {
+const setup = (
+  voice?: HiredGoogleVoice,
+  mail?: import('./hired-mail').HiredMail,
+) => {
   const person = {
     id,
     phones: { primaryPhoneNumber: phone, primaryPhoneCallingCode: '1' },
@@ -82,6 +85,7 @@ const setup = (voice?: HiredGoogleVoice) => {
     service: new HiredDeskService(
       orm as unknown as GlobalWorkspaceOrmManager,
       voice,
+      mail,
     ),
     person,
     notes,
@@ -91,6 +95,8 @@ const setup = (voice?: HiredGoogleVoice) => {
 };
 afterEach(() => {
   delete process.env.KIOSKX_HIRED_VOICE;
+  delete process.env.KIOSKX_GOOGLE_VOICE_NUMBER;
+  delete process.env.KIOSKX_HIRED_EMAIL;
 });
 it.each([undefined, 'false', 'TRUE', '1'])(
   'returns only safe contact-form inquiries with voice=%s',
@@ -101,8 +107,8 @@ it.each([undefined, 'false', 'TRUE', '1'])(
     expect(result.leads).toHaveLength(1);
     expect(result.leads[0].label).toMatch(/^Inquiry /);
     expect(result.leads[0].inquiry).toContain('I want a cabinet');
-    expect(result.leads[0].email).toBe(email);
-    expect(result.leads[0].phone).toBe('+1 ' + phone);
+    expect(result.leads[0].email).toBe('••••@••••');
+    expect(result.leads[0].phone).toBe('••• ••• ••••');
     expect(result.leads[0].inquiry).not.toContain(email);
     expect(result.leads[0].inquiry).not.toContain(phone);
     expect(result.leads[0].canCall).toBe(false);
@@ -135,6 +141,7 @@ it('fails closed on query errors', async () => {
 });
 it('requires configured Google Voice and a destination even when enabled', async () => {
   process.env.KIOSKX_HIRED_VOICE = 'true';
+  process.env.KIOSKX_GOOGLE_VOICE_NUMBER = 'test-line';
   expect((await setup().service.leads()).leads[0].canCall).toBe(false);
   const { service, person } = setup({
     configured: () => true,
@@ -145,6 +152,7 @@ it('requires configured Google Voice and a destination even when enabled', async
 });
 it('uses only the injected fake Google Voice and stores the admin transcript once', async () => {
   process.env.KIOSKX_HIRED_VOICE = 'true';
+  process.env.KIOSKX_GOOGLE_VOICE_NUMBER = 'test-line';
   const voice = {
     configured: () => true,
     conversation: jest.fn(async () => ({
@@ -159,6 +167,7 @@ it('uses only the injected fake Google Voice and stores the admin transcript onc
   expect(notes.update).toHaveBeenCalledWith(
     expect.any(String),
     expect.objectContaining({
+      title: 'KioskX hired call',
       bodyV2: expect.objectContaining({ markdown: 'Private admin transcript' }),
     }),
   );
@@ -168,6 +177,7 @@ it('uses only the injected fake Google Voice and stores the admin transcript onc
 });
 it('does not replay ambiguous calls or echo transport errors', async () => {
   process.env.KIOSKX_HIRED_VOICE = 'true';
+  process.env.KIOSKX_GOOGLE_VOICE_NUMBER = 'test-line';
   const voice = {
     configured: () => true,
     conversation: jest.fn(async () => {
@@ -224,6 +234,7 @@ it.each([
   ['GET', 'session'],
   ['GET', 'leads'],
   ['POST', 'call'],
+  ['POST', 'email'],
 ])('accepts full originalUrl for %s %s', (method, endpoint) => {
   expect(
     hiredRequestAllowed(identity, {
@@ -260,8 +271,8 @@ it.each(['KioskX contact form', 'KioskX newsletter'])(
       },
     ]);
     expect((await service.leads()).leads[0]).toMatchObject({
-      email: 'note@example.test',
-      phone: '+1 (202) 555-0145',
+      email: '••••@••••',
+      phone: '••• ••• ••••',
       canCall: false,
     });
   },
@@ -282,4 +293,127 @@ it('returns empty first-class fields when both sources lack contacts', async () 
     phone: '',
     canCall: false,
   });
+});
+
+it('does not offer calling when the line is missing even with an adapter', async () => {
+  process.env.KIOSKX_HIRED_VOICE = 'true';
+  const voice = { configured: () => true, conversation: jest.fn() };
+  const { service } = setup(voice);
+  expect((await service.leads()).leads[0].canCall).toBe(false);
+  expect(await service.call(id, id)).toEqual({ status: 'unavailable' });
+  expect(voice.conversation).not.toHaveBeenCalled();
+});
+it('does not claim a transcript was saved when completed call text is empty', async () => {
+  process.env.KIOSKX_HIRED_VOICE = 'true';
+  process.env.KIOSKX_GOOGLE_VOICE_NUMBER = 'test-line';
+  const { service, notes } = setup({
+    configured: () => true,
+    conversation: async () => ({ transcript: ' ' }),
+  });
+  expect(await service.call(id, id)).toEqual({ status: 'unknown' });
+  expect(notes.update).not.toHaveBeenCalled();
+});
+it('sends from server-resolved recipient once and stores the sent body for admins', async () => {
+  process.env.KIOSKX_HIRED_EMAIL = 'true';
+  const mail = { configured: () => true, send: jest.fn(async () => {}) };
+  const { service, notes, targets } = setup(undefined, mail);
+  const result = await service.email(id, id, 'Hello');
+  expect(result.status).toBe('sent');
+  expect(mail.send).toHaveBeenCalledWith({
+    destination: email,
+    body: 'Hello',
+    operationId: expect.any(String),
+  });
+  expect(notes.insert).toHaveBeenCalledWith(
+    expect.objectContaining({
+      title: 'KioskX hired email pending',
+      bodyV2: expect.objectContaining({
+        markdown: 'Hello',
+        blocknote: expect.any(String),
+      }),
+    }),
+  );
+  expect(targets.insert).toHaveBeenCalled();
+  expect(notes.update).toHaveBeenCalledWith(expect.any(String), {
+    title: 'KioskX hired email',
+  });
+  expect(await service.email(id, id, 'Hello')).toEqual({
+    status: 'alreadySubmitted',
+  });
+  expect(mail.send).toHaveBeenCalledTimes(1);
+});
+it('does not send mail when off or to a non-form lead', async () => {
+  const mail = { configured: () => true, send: jest.fn() };
+  const { service } = setup(undefined, mail);
+  expect(await service.email(id, id, 'Hello')).toEqual({
+    status: 'unavailable',
+  });
+  process.env.KIOSKX_HIRED_EMAIL = 'true';
+  expect(await service.email('not-a-lead', id, 'Hello')).toEqual({
+    status: 'unavailable',
+  });
+  expect(mail.send).not.toHaveBeenCalled();
+});
+it('retains an ambiguous mail claim and never replays or leaks the error', async () => {
+  process.env.KIOSKX_HIRED_EMAIL = 'true';
+  const mail = {
+    configured: () => true,
+    send: jest.fn(async () => {
+      throw new Error(email);
+    }),
+  };
+  const { service, notes } = setup(undefined, mail);
+  expect(await service.email(id, id, 'Hello')).toEqual({ status: 'unknown' });
+  expect(await service.email(id, id, 'Hello')).toEqual({
+    status: 'alreadySubmitted',
+  });
+  expect(mail.send).toHaveBeenCalledTimes(1);
+  expect(notes.update).not.toHaveBeenCalled();
+});
+it('uses name and company from the form, never leaking contacts in labels', async () => {
+  const { service, notes } = setup();
+  notes.find.mockResolvedValue([
+    {
+      id: 'form',
+      title: 'KioskX contact form',
+      bodyV2: {
+        markdown:
+          '|Name: Alex|Company: Example Retail|Message: A cabinet please|',
+      },
+    },
+  ]);
+  expect((await service.leads()).leads[0]).toMatchObject({
+    label: 'Alex',
+    company: 'Example Retail',
+  });
+});
+
+it('reloads only sent emails on the matching inquiry and redacts extra addresses', async () => {
+  const { service, notes, targets } = setup();
+  notes.find.mockImplementation(async (options: any) =>
+    typeof options.where.title === 'string'
+      ? ([
+          {
+            id: 'sent',
+            title: 'KioskX hired email',
+            createdAt: new Date('2026-10-29T10:00:00Z'),
+            bodyV2: { markdown: 'Hello. Other person: other@example.test' },
+          },
+        ] as any)
+      : [
+          {
+            id: 'form',
+            title: 'KioskX contact form',
+            bodyV2: { markdown: 'Need a cabinet' },
+          },
+        ],
+  );
+  targets.find.mockResolvedValue([
+    { noteId: 'form', targetPersonId: id },
+    { noteId: 'sent', targetPersonId: id },
+  ]);
+  const lead = (await service.leads()).leads[0];
+  expect(lead.messages).toHaveLength(1);
+  expect(lead.messages[0].body).toContain('Hello.');
+  expect(JSON.stringify(lead)).not.toContain('other@example.test');
 });

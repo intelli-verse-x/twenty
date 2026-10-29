@@ -64,6 +64,8 @@ export const formContacts = (body: Parameters<typeof formText>[0]) => {
       )?.[1]
       ?.trim() ?? '';
   return {
+    name: redactContactText(field('(?:full )?name')),
+    company: redactContactText(field('company(?: name)?')),
     email:
       field('email').match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/i)?.[0] ?? '',
     phone:

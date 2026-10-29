@@ -3,6 +3,7 @@ import { tokenPairState } from '@/auth/states/tokenPairState';
 import { useSetAtomState } from '@/ui/utilities/state/jotai/hooks/useSetAtomState';
 import { useAtomStateValue } from '@/ui/utilities/state/jotai/hooks/useAtomStateValue';
 import { clearSessionLocalStorageKeys } from '@/auth/utils/clearSessionLocalStorageKeys';
+import { BaseThemeProvider } from '@/ui/theme/components/BaseThemeProvider';
 import { HiredDesk } from './HiredDesk';
 
 // Resolve the server's identity before mounting any CRM data providers or routes.
@@ -56,7 +57,9 @@ export const HiredDeskBoundary = ({ children }: { children: ReactNode }) => {
   if (!token) return children;
   if (session?.token === token)
     return session.hired ? (
-      <HiredDesk key={token} request={request} onSignOut={signOut} />
+      <BaseThemeProvider>
+        <HiredDesk key={token} request={request} onSignOut={signOut} />
+      </BaseThemeProvider>
     ) : (
       children
     );

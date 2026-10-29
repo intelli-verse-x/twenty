@@ -57,4 +57,23 @@ export class HiredDeskController {
       throw new ForbiddenException();
     return this.desk.call(input.leadId, input.requestId);
   }
+  @Post('email')
+  @Header('Cache-Control', 'no-store')
+  async email(@Req() request: Request, @Body() body: unknown) {
+    await this.authorize(request);
+    if (!body || typeof body !== 'object') throw new ForbiddenException();
+    const input = body as Record<string, unknown>;
+    if (
+      Object.keys(input).sort().join(',') !== 'body,leadId,requestId' ||
+      typeof input.leadId !== 'string' ||
+      typeof input.requestId !== 'string' ||
+      !/^[0-9a-f-]{36}$/i.test(input.leadId) ||
+      !/^[0-9a-f-]{36}$/i.test(input.requestId) ||
+      typeof input.body !== 'string' ||
+      !input.body.trim() ||
+      input.body.length > 10000
+    )
+      throw new ForbiddenException();
+    return this.desk.email(input.leadId, input.requestId, input.body);
+  }
 }

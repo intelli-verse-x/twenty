@@ -1,0 +1,209 @@
+.hired-desk {
+  display: flex;
+  min-height: 100vh;
+  width: 100%;
+  color: var(--t-font-color-primary, #333);
+  background: var(--t-background-primary, #fff);
+  font-family: Inter, system-ui, sans-serif;
+  font-size: 14px;
+  line-height: 1.5;
+  overflow-wrap: anywhere;
+}
+.hired-desk * {
+  box-sizing: border-box;
+}
+.hired-sidebar {
+  width: 208px;
+  flex: 0 0 208px;
+  padding: 24px 16px;
+  background: var(--t-background-secondary, #f8f8f8);
+  border-right: 1px solid var(--t-border-color-light, #ebebeb);
+}
+.hired-sidebar strong,
+.hired-sidebar > span {
+  display: block;
+  padding: 0 8px;
+}
+.hired-sidebar strong {
+  font-size: 18px;
+}
+.hired-nav {
+  margin-top: 32px;
+  padding: 8px 12px;
+  border-radius: 6px;
+  background: var(--t-background-tertiary, #ededed);
+  font-weight: 600;
+}
+.hired-workspace {
+  flex: 1;
+  min-width: 0;
+}
+.hired-toolbar {
+  min-height: 64px;
+  padding: 12px 28px;
+  border-bottom: 1px solid var(--t-border-color-light, #ebebeb);
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 16px;
+}
+.hired-toolbar h1 {
+  font-size: 16px;
+  font-weight: 600;
+  margin: 0;
+}
+.hired-count {
+  margin-left: 8px;
+  color: var(--t-font-color-secondary, #666);
+  font-weight: 400;
+}
+.hired-content {
+  max-width: 1120px;
+  margin: auto;
+  padding: 24px 28px 48px;
+}
+.hired-list-toolbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 12px;
+  margin-bottom: 20px;
+  color: var(--t-font-color-secondary, #666);
+}
+.hired-list-toolbar input {
+  max-width: 260px;
+  min-width: 0;
+  width: 45%;
+}
+.hired-desk input,
+.hired-desk textarea {
+  border: 1px solid var(--t-border-color-medium, #d6d6d6);
+  border-radius: 5px;
+  background: var(--t-background-primary, white);
+  color: inherit;
+  padding: 8px 10px;
+  font: inherit;
+}
+.hired-desk input:focus-visible,
+.hired-desk textarea:focus-visible {
+  outline: 2px solid #4268d0;
+  outline-offset: 2px;
+}
+.hired-card {
+  margin-bottom: 16px;
+  overflow: hidden;
+}
+.hired-card-heading {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--t-border-color-light, #ebebeb);
+}
+.hired-card h2 {
+  font-size: 15px;
+  margin: 0;
+  font-weight: 600;
+}
+.hired-card h3 {
+  font-size: 13px;
+  margin: 0 0 12px;
+}
+.hired-card p {
+  margin: 8px 0 0;
+}
+.hired-card-heading p {
+  margin: 2px 0 0;
+}
+.hired-avatar {
+  width: 34px;
+  height: 34px;
+  flex-shrink: 0;
+  display: grid;
+  place-items: center;
+  background: var(--t-background-tertiary, #ededed);
+  border-radius: 8px;
+  font-weight: 600;
+}
+.hired-source {
+  margin-left: auto;
+  font-size: 12px;
+  border: 1px solid var(--t-border-color-light, #ebebeb);
+  border-radius: 4px;
+  padding: 2px 7px;
+  color: var(--t-font-color-secondary, #666);
+}
+.hired-card-main {
+  padding: 16px 20px;
+}
+.hired-fields {
+  display: grid;
+  grid-template-columns: 132px minmax(0, 1fr);
+  gap: 9px 20px;
+  margin: 0 0 20px;
+}
+.hired-field {
+  display: contents;
+}
+.hired-fields dt,
+.hired-muted {
+  color: var(--t-font-color-secondary, #666);
+}
+.hired-fields dd {
+  margin: 0;
+  white-space: pre-wrap;
+}
+.hired-actions {
+  display: flex;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+.hired-compose,
+.hired-thread {
+  margin-top: 20px;
+  border-top: 1px solid var(--t-border-color-light, #ebebeb);
+  padding-top: 16px;
+}
+.hired-compose label {
+  display: block;
+  margin: 12px 0 6px;
+}
+.hired-compose textarea {
+  display: block;
+  width: 100%;
+  resize: vertical;
+  margin-bottom: 12px;
+}
+.hired-message {
+  border-left: 2px solid var(--t-border-color-medium, #ddd);
+  padding: 0 12px 8px;
+  margin-top: 12px;
+  white-space: pre-wrap;
+}
+@media (max-width: 720px) {
+  .hired-sidebar {
+    display: none;
+  }
+  .hired-toolbar {
+    padding: 12px 16px;
+  }
+  .hired-content {
+    padding: 16px 12px 32px;
+  }
+  .hired-card-heading,
+  .hired-card-main {
+    padding: 14px;
+  }
+  .hired-fields {
+    grid-template-columns: 90px minmax(0, 1fr);
+    gap: 8px 12px;
+  }
+  .hired-list-toolbar {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+  .hired-list-toolbar input {
+    width: 100%;
+    max-width: none;
+  }
+}
