@@ -24,10 +24,10 @@ export const hiredRequestAllowed = (
   }
   return (
     (request.method === 'GET' &&
-      ['/kioskx-hired-desk/session', '/kioskx-hired-desk/leads'].includes(
+      ['/kioskx-hired-desk/session', '/kioskx-hired-desk/leads', '/kioskx-hired-desk/voice-config'].includes(
         path,
       )) ||
     (request.method === 'POST' &&
-      ['/kioskx-hired-desk/call', '/kioskx-hired-desk/email'].includes(path))
+      ['/kioskx-hired-desk/call', '/kioskx-hired-desk/email', '/kioskx-hired-desk/voice-bridge'].includes(path))
   );
 };

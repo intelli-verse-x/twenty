@@ -38,6 +38,7 @@ const setup = (
   };
   const claims = new Set<string>();
   const notes = {
+    findOne: jest.fn(async () => null),
     find: jest.fn(async () => [
       {
         id: 'form',
@@ -139,55 +140,29 @@ it('fails closed on query errors', async () => {
   notes.find.mockRejectedValue(new Error(email));
   expect(await service.leads()).toEqual({ unavailable: true, leads: [] });
 });
-it('requires configured Google Voice and a destination even when enabled', async () => {
-  process.env.KIOSKX_HIRED_VOICE = 'true';
-  process.env.KIOSKX_GOOGLE_VOICE_NUMBER = 'test-line';
+it('requires an office number and a valid destination', async () => {
   expect((await setup().service.leads()).leads[0].canCall).toBe(false);
-  const { service, person } = setup({
-    configured: () => true,
-    conversation: jest.fn(),
-  });
+  process.env.KIOSKX_GOOGLE_VOICE_NUMBER = '+12025550100';
+  const { service, person } = setup();
+  expect((await service.leads()).leads[0].canCall).toBe(true);
   person.phones.primaryPhoneNumber = '';
   expect((await service.leads()).leads[0].canCall).toBe(false);
 });
-it('uses only the injected fake Google Voice and stores the admin transcript once', async () => {
-  process.env.KIOSKX_HIRED_VOICE = 'true';
-  process.env.KIOSKX_GOOGLE_VOICE_NUMBER = 'test-line';
-  const voice = {
-    configured: () => true,
-    conversation: jest.fn(async () => ({
-      transcript: 'Private admin transcript',
-    })),
-  };
+it('returns Connect without invoking a legacy dialer or creating a call claim', async () => {
+  process.env.KIOSKX_GOOGLE_VOICE_NUMBER = '+12025550100';
+  const voice = { configured: () => true, conversation: jest.fn() };
   const { service, notes } = setup(voice);
-  expect((await service.leads()).leads[0].canCall).toBe(true);
-  expect(await service.call(id, id)).toEqual({ status: 'complete' });
-  expect(await service.call(id, id)).toEqual({ status: 'alreadySubmitted' });
-  expect(voice.conversation).toHaveBeenCalledTimes(1);
-  expect(notes.update).toHaveBeenCalledWith(
-    expect.any(String),
-    expect.objectContaining({
-      title: 'KioskX hired call',
-      bodyV2: expect.objectContaining({ markdown: 'Private admin transcript' }),
-    }),
-  );
-  expect(JSON.stringify(await service.leads())).not.toContain(
-    'Private admin transcript',
-  );
+  expect(await service.call(id, id)).toEqual({ status: 'connect' });
+  expect(voice.conversation).not.toHaveBeenCalled();
+  expect(notes.insert).not.toHaveBeenCalled();
 });
-it('does not replay ambiguous calls or echo transport errors', async () => {
-  process.env.KIOSKX_HIRED_VOICE = 'true';
-  process.env.KIOSKX_GOOGLE_VOICE_NUMBER = 'test-line';
-  const voice = {
-    configured: () => true,
-    conversation: jest.fn(async () => {
-      throw new Error(phone);
-    }),
-  };
+it('keeps an explicit operator disable and never calls a legacy dialer', async () => {
+  process.env.KIOSKX_HIRED_VOICE = 'false';
+  process.env.KIOSKX_GOOGLE_VOICE_NUMBER = '+12025550100';
+  const voice = { configured: () => true, conversation: jest.fn() };
   const { service } = setup(voice);
-  expect(await service.call(id, id)).toEqual({ status: 'unknown' });
-  await service.call(id, id);
-  expect(voice.conversation).toHaveBeenCalledTimes(1);
+  expect(await service.call(id, id)).toEqual({ status: 'unavailable' });
+  expect(voice.conversation).not.toHaveBeenCalled();
 });
 it.each([
   '/graphql',
@@ -310,7 +285,7 @@ it('does not claim a transcript was saved when completed call text is empty', as
     configured: () => true,
     conversation: async () => ({ transcript: ' ' }),
   });
-  expect(await service.call(id, id)).toEqual({ status: 'unknown' });
+  expect(await service.call(id, id)).toEqual({ status: 'connect' });
   expect(notes.update).not.toHaveBeenCalled();
 });
 it('sends from server-resolved recipient once and stores the sent body for admins', async () => {
