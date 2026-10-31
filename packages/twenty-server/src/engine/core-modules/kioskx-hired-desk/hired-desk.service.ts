@@ -226,8 +226,9 @@ export class HiredDeskService {
           : [];
         return {
           unavailable: false,
-          leads: records.map(
-            ({ person, label, company, inquiry, email, phone }) => ({
+          leads: await Promise.all(records.map(
+            async ({ person, label, company, inquiry, email, phone }) => ({
+              voiceTranscripts: await this.voiceTranscripts(person.id),
               id: person.id,
               label,
               company,
@@ -251,7 +252,7 @@ export class HiredDeskService {
                   createdAt: new Date(note.createdAt).toISOString(),
                 })),
             }),
-          ),
+          )),
         };
       });
     } catch (error) {
@@ -308,7 +309,27 @@ export class HiredDeskService {
       return { status: 'unknown' };
     }
   }
+  // Only admin-imported speech linked to this inquiry reaches the hired desk.
+  // Never expose provider URLs, operation metadata, or unmasked contact details.
+  async voiceTranscripts(leadId: string) {
+    return this.system(async () => {
+      const targets = await this.repo<NoteTargetWorkspaceEntity>('noteTarget');
+      const notes = await this.repo<NoteWorkspaceEntity>('note');
+      const links = await targets.find({ where: { targetPersonId: leadId } });
+      const result: { id: string; transcript: string }[] = [];
+      for (const link of links) {
+        const note = await notes.findOne({ where: { id: link.noteId } });
+        if (note?.title !== 'KioskX Google Voice transcript') continue;
+        const match = note.bodyV2?.markdown?.match(/^Source: https:\/\/(?:voice\.google\.com|drive\.google\.com)\/[^\r\n]*\nCall: [a-f0-9-]{36}\n\n([\s\S]+)$/i);
+        if (!match?.[1].trim()) continue;
+        const transcript = redactContactText(match[1]).replace(/https?:\/\/\S+/gi, '[link removed]');
+        if (transcript.trim()) result.push({ id: note.id, transcript });
+      }
+      return result;
+    });
+  }
   async importVoiceTranscript(operationId: string, transcript: string, source: string) {
+    if (process.env.KIOSKX_HIRED_VOICE_TRANSCRIPT_IMPORT === 'false') return { status: 'unavailable' };
     return this.system(async () => {
       const notes = await this.repo<NoteWorkspaceEntity>('note');
       const note = await notes.findOne({ where: { id: operationId } });

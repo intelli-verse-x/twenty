@@ -41,7 +41,7 @@ function controller(identity,adminIds=''){
 test('unauthenticated bridge is rejected',async()=>{await assert.rejects(()=>controller(null).voiceConfig({}));});
 test('hired account cannot import transcripts even if accidentally allowlisted',async()=>{const c=controller({user:{id:'u',email:'support@kiosk-x.ai'},workspace:{id:'test'}},'u');await assert.rejects(()=>c.voiceTranscript({token:'fake'},{}));});
 test('admin import is disabled until explicitly allowlisted',async()=>{const c=controller({user:{id:'u',email:'admin@example.test'},workspace:{id:'test'}});await assert.rejects(()=>c.voiceTranscript({token:'fake'},{}));});
-test('admin import requires real nonempty text and Google source reference',async()=>{const c=controller({user:{id:'u',email:'admin@example.test'},workspace:{id:'test'}},'u');const input={operationId:crypto.randomUUID(),transcript:'Fixture spoken words',source:'https://voice.google.com/fixture'};assert.equal((await c.voiceTranscript({token:'fake'},input)).status,'saved');await assert.rejects(()=>c.voiceTranscript({token:'fake'},{...input,transcript:''}));await assert.rejects(()=>c.voiceTranscript({token:'fake'},{...input,source:'javascript:alert(1)'}));});
+test('admin import requires real nonempty text and Google source reference',async()=>{const c=controller({user:{id:'u',email:'admin@example.test'},workspace:{id:'test'}},'u');const input={operationId:crypto.randomUUID(),transcript:'Fixture spoken words',source:'https://voice.google.com/fixture'};assert.equal((await c.voiceTranscript({token:'fake'},input)).status,'saved');await assert.rejects(()=>c.voiceTranscript({token:'fake'},{...input,transcript:''}));await assert.rejects(()=>c.voiceTranscript({token:'fake'},{...input,source:'javascript:alert(1)'}));await assert.rejects(()=>c.voiceTranscript({token:'fake'},{...input,source:'https://voiceXgoogleXcom/fixture'}));});
 test('account check accepts the office number only under the Voice number heading',async()=>{
  const {ctx}=extension(true);ctx.document={body:{innerText:'Account\nGoogle Voice number\n(202) 555-0100\nLinked numbers\n(202) 555-0199'}};ctx.location={origin:'https://voice.google.com',pathname:'/u/0/settings'};
  ctx.chrome.scripting.executeScript=async({func,args})=>[{result:await func(...args)}];
@@ -78,4 +78,27 @@ test('imported transcript renders in the admin rich-text field and repairs a mis
  const note=[...s.rows.values()].find(x=>x.title==='KioskX Google Voice transcript');
  assert.match(JSON.parse(note.bodyV2.blocknote)[0].content[0].text,/Fixture spoken words/);
  s.links.pop();assert.equal((await s.desk.importVoiceTranscript(...args)).status,'alreadySubmitted');assert.equal(s.links.length,2);
+});
+test('Calls stays empty without a source; imported speech is masked and scoped to its inquiry',async()=>{
+ const s=setup();await s.connect();await s.desk.call(lead,crypto.randomUUID());
+ const job=await s.desk.bridge({action:'poll',sessionId:s.sessionId});
+ assert.equal((await s.desk.voiceTranscripts(lead)).length,0);
+ await s.desk.bridge({action:'result',sessionId:s.sessionId,operationId:job.operationId,status:'opened'});
+ assert.equal((await s.desk.voiceTranscripts(lead)).length,0);
+ await s.desk.importVoiceTranscript(job.operationId,'Fixture conversation: Please send the details to person@example.test or +12025550123.','https://voice.google.com/fixture');
+ const saved=await s.desk.voiceTranscripts(lead);
+ assert.equal(saved.length,1);assert.match(saved[0].transcript,/Fixture conversation/);
+ assert.doesNotMatch(JSON.stringify(saved),/person@|202555|voice.google.com|Source:|Call:/);
+ assert.equal((await s.desk.voiceTranscripts('other')).length,0);
+});
+test('import toggle stops writes and keeps already saved speech readable',async()=>{
+ const s=setup();await s.connect();await s.desk.call(lead,crypto.randomUUID());
+ const job=await s.desk.bridge({action:'poll',sessionId:s.sessionId});
+ s.env.KIOSKX_HIRED_VOICE_TRANSCRIPT_IMPORT='false';
+ assert.equal((await s.desk.importVoiceTranscript(job.operationId,'Fixture speech','https://voice.google.com/fixture')).status,'unavailable');
+ assert.equal((await s.desk.voiceTranscripts(lead)).length,0);
+ s.env.KIOSKX_HIRED_VOICE_TRANSCRIPT_IMPORT='true';
+ assert.equal((await s.desk.importVoiceTranscript(job.operationId,'Fixture speech','https://voice.google.com/fixture')).status,'saved');
+ s.env.KIOSKX_HIRED_VOICE_TRANSCRIPT_IMPORT='false';
+ assert.equal((await s.desk.voiceTranscripts(lead))[0].transcript,'Fixture speech');
 });

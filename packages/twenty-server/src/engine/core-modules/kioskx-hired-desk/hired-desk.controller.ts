@@ -92,7 +92,7 @@ export class HiredDeskController {
     const input = body as Record<string, unknown>;
     if (!input || typeof input.operationId !== 'string' || !/^[a-f0-9-]{36}$/i.test(input.operationId) ||
         typeof input.transcript !== 'string' || !input.transcript.trim() || input.transcript.length > 100000 ||
-        typeof input.source !== 'string' || !/^https:\/\/(?:voice.google.com|drive.google.com)\/[^\s]{1,500}$/.test(input.source))
+        typeof input.source !== 'string' || !/^https:\/\/(?:voice\.google\.com|drive\.google\.com)\/[^\s]{1,500}$/.test(input.source))
       throw new ForbiddenException();
     return this.desk.importVoiceTranscript(input.operationId, input.transcript.trim(), input.source);
   }

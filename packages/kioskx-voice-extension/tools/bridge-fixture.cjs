@@ -14,9 +14,9 @@ function setup(){
  insert:async r=>{if(rows.has(r.id))throw Error('duplicate');rows.set(r.id,{...r});},
  update:async(criteria,patch)=>{const id=typeof criteria==='string'?criteria:criteria.id;const row=rows.get(id);
  if(!row||(criteria.title&&criteria.title!==row.title))return{affected:0};Object.assign(row,patch);return{affected:1};}};
- class Desk{async system(fn){return fn();}async repo(name){return name==='note'?notes:{insert:async r=>links.push(r),find:async({where})=>links.filter(x=>x.noteId===where.noteId)};}
+ class Desk{async system(fn){return fn();}async repo(name){return name==='note'?notes:{insert:async r=>links.push(r),find:async({where})=>links.filter(x=>where.noteId ? x.noteId===where.noteId : x.targetPersonId===where.targetPersonId)};}
  async records(){return[{person:{id:lead},phone:'+12025550123'}];} destination(x){return x;}}
- const box={exports:{},require:n=>n==='node:crypto'?crypto:{HIRED_WORKSPACE:'test'},Buffer,process:{env:{KIOSKX_GOOGLE_VOICE_NUMBER:fakeOffice}},Date};
+ const box={exports:{},require:n=>n==='node:crypto'?crypto:n==='./hired-redact'?{redactContactText:s=>s.replace(/[^\s]+@[^\s]+/g,'[email removed]').replace(/\+?\d[\d ()-]{6,}\d/g,'[phone removed]')}:{HIRED_WORKSPACE:'test'},Buffer,process:{env:{KIOSKX_GOOGLE_VOICE_NUMBER:fakeOffice}},Date};
  vm.runInNewContext(fs.readFileSync(path.join(built,'hired-google-voice-overlay.js'),'utf8'),box);
  box.exports.install(Desk); const desk=new Desk();
  return{desk,rows,links,notes,env:box.process.env,connect:()=>desk.bridge({action:'connect',publicKey,sessionId:'22222222-2222-4222-a222-222222222222'}),sessionId:'22222222-2222-4222-a222-222222222222'};

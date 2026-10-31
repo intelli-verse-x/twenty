@@ -94,3 +94,51 @@ via `/kioskx-hired-desk/voice-transcript`. `KIOSKX_VOICE_TRANSCRIPT_ADMIN_IDS` i
 empty by default; only explicitly allowlisted admin IDs may import. The hired
 account is always denied. Import attaches an idempotent admin note to the original
 inquiry; it is not automatic Google Voice transcription.
+
+### Real-source import and Calls display
+
+The Calls tab now reads imported speech attached to that inquiry and refreshes
+with the existing 30-second inquiry poll. It strips source metadata and masks
+contact details before returning text to the hired user. Recording and summary
+remain unavailable: a source reference is not an audio file, and a transcript is
+not a summary. “Saved to inquiry” means imported text exists, never that a queued
+call connected. Existing admin notes retain the source and original text.
+
+`KIOSKX_HIRED_VOICE_TRANSCRIPT_IMPORT` defaults **on**, but authorization still
+requires `KIOSKX_VOICE_TRANSCRIPT_ADMIN_IDS` (default **empty**). Set the import
+flag to `false` to reject new imports without hiding existing saved speech.
+There is no automatic collector in this release and no toggle that pretends to
+enable one. The extension is not trusted to submit arbitrary speech as evidence.
+Keep `KIOSKX_VOICE_CALL=false`.
+
+Founder/admin enable steps:
+
+1. Verify the office account's actual Voice subscription. Google documents
+   “take notes for me” for eligible Standard/Premier plans, including Standard
+   standalone; do not assume free consumer Voice supports outbound transcripts.
+   Enable the eligible recording/notes feature in Google administration/settings.
+   Google plays its recording notice. Confirm a controlled, authorized call
+   actually produces both sides of the conversation in its call log.
+2. An admin with access to that call checks the source and matches it to the
+   inquiry's Google Voice handoff note ID. Opening a dial link is insufficient.
+3. Allowlist that admin's existing Twenty user ID in
+   `KIOSKX_VOICE_TRANSCRIPT_ADMIN_IDS`; never allowlist the hired support identity.
+   Keep `KIOSKX_HIRED_VOICE_TRANSCRIPT_IMPORT` unset or `true`.
+4. Using that admin's authenticated session, POST JSON fields `operationId`
+   (handoff note ID), `transcript` (real speech text), and `source` (the original
+   HTTPS Google Voice or Drive reference) to `/kioskx-hired-desk/voice-transcript`.
+   Do not put bearer credentials in shell history or reports. `saved` means the
+   text was attached; retries never overwrite existing text.
+5. Within 30 seconds on a visible inquiry, Calls shows the masked transcript.
+   If there is no eligible source, leave the transcript empty. Admin importing
+   text is the supported path; account eligibility and automatic retrieval have
+   not been verified for the office account.
+
+Research (31 October 2026):
+- https://support.google.com/voice/answer/16968663 describes eligible plans,
+  call-log access, and exclusive recording/transcript access for the initiator.
+- https://knowledge.workspace.google.com/admin/voice/let-google-voice-take-ai-notes-for-my-users
+  describes admin prerequisites. These pages do not establish a public transcript
+  retrieval API. No authenticated office transcript DOM or API contract was
+  available to validate a scraper. Phone microphone capture would not prove
+  both sides of the linked-phone call and is not used.

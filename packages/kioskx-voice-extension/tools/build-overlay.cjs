@@ -15,12 +15,18 @@ function selected(file, names) {
   const cls = ast.statements.find(ts.isClassDeclaration);
   return cls.members.filter(m => names.includes(m.name?.getText(ast))).map(m => m.getText(ast)).join('\n');
 }
-const serviceNames = ['voiceOn', 'bridgeSession', 'bridgeConfig', 'bridge', 'call', 'importVoiceTranscript'];
+const serviceNames = ['voiceOn', 'bridgeSession', 'bridgeConfig', 'bridge', 'call', 'importVoiceTranscript', 'voiceTranscripts'];
 const serviceCode = `const {createHash, publicEncrypt, createPublicKey, constants}=require('node:crypto');
 const {HIRED_WORKSPACE}=require('./hired-policy');
+const {redactContactText}=require('./hired-redact');
 class VoiceMethods { ${selected('hired-desk.service.ts', serviceNames)} }
 exports.install = C => { for(const name of ${JSON.stringify(serviceNames)})
 Object.defineProperty(C.prototype,name,Object.getOwnPropertyDescriptor(VoiceMethods.prototype,name));
+const originalLeads=C.prototype.leads;
+if(originalLeads) C.prototype.leads=async function(){
+const result=await originalLeads.call(this);
+if(!result.unavailable) result.leads=await Promise.all(result.leads.map(async lead=>({...lead,voiceTranscripts:await this.voiceTranscripts(lead.id)})));
+return result; };
 C.prototype.bridgeNote='4694fd8b-c7e3-4d0a-9e57-703253445802'; };`;
 const compile = code => ts.transpileModule(code, { compilerOptions: { target: ts.ScriptTarget.ES2022,
   module: ts.ModuleKind.CommonJS, experimentalDecorators: true, emitDecoratorMetadata: false } }).outputText;
@@ -56,6 +62,15 @@ let entry=fs.readFileSync(path.join(input,'entry.js'),'utf8');
 function replace(old,next) { if(entry.split(old).length!==2) throw Error('Pinned front does not match'); entry=entry.replace(old,next); }
 replace('I(s.status==="placed"),g(s.status==="placed"?"Call placed":s.status==="unavailable"?"Calling is unavailable. Contact your admin.":"Call status is unavailable. Contact your admin before trying again."),s.status==="unavailable"&&(L.current=void 0)',
 'I(s.status==="queued"),g(s.status==="queued"?"Sent to Google Voice. Answer your linked phone if it rings. Call outcome and transcript are not yet available.":s.status==="connect"?"Use Connect Google Voice, then try Call again.":s.status==="unavailable"?"Calling is unavailable. Contact your admin.":"Call status is unknown. Contact your admin before trying again."),(s.status==="unavailable"||s.status==="connect")&&(L.current=void 0)');
+replace('["Call","Recording","Transcript + summary","Saved to inquiry","Set potential"]',
+'["Call outcome unverified","Recording unavailable",(a.voiceTranscripts?.length?"Transcript imported":"Transcript unavailable"),(a.voiceTranscripts?.length?"Saved to inquiry":"No transcript saved"),"Set potential"]');
+replace('C.createElement("p",null,"No transcript available.")',
+'(a.voiceTranscripts?.length?a.voiceTranscripts.map(t=>C.createElement("p",{key:t.id,style:{whiteSpace:"pre-wrap",overflowWrap:"anywhere"}},t.transcript)):C.createElement("p",null,"No transcript available."))');
+replace('"Call notes and lead potential remain in Overview."',
+'"Automatic transcripts require an eligible Google Voice recording and import. An admin can import available speech text; opening Google Voice does not create a recording or transcript. Call notes and lead potential remain in Overview."');
+replace('N||"No call placed"', '(a.voiceTranscripts?.length?"Transcript imported and saved to inquiry; call outcome not independently verified":N||"No call placed")');
+replace('C.createElement("li",{key:t},C.createElement("span",null,s+1),t)',
+'C.createElement("li",{key:t},C.createElement("span",{style:{background:(a.voiceTranscripts?.length&&(s===2||s===3))?"#173f43":"#777"}},s+1),t)');
 // Keep the same module URL: other live chunks import this entry. A second URL
 // evaluates it twice and breaks /welcome with duplicate selection registration.
 const name='index-email-call-0862f92d1c3b.js';

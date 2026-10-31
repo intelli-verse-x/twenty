@@ -44,7 +44,7 @@ const origin = 'https://kioskx.crm.intelli-verse-x.ai';
       if (endpoint === 'session') json = { hired: true };
       else if (endpoint === 'leads') json = { leads: [{
         id: lead, label: 'Test inquiry', company: 'Fixture company', inquiry: 'Fixture inquiry',
-        email: '••••@••••', phone: '••• ••• ••••', canCall: true, messages: [], potential: 'Unrated', callNotes: [],
+        email: '••••@••••', phone: '••• ••• ••••', canCall: true, messages: [], potential: 'Unrated', callNotes: [], voiceTranscripts: await fixture.desk.voiceTranscripts(lead),
       }] };
       else if (endpoint === 'activity') json = { status: 'recorded' };
       else if (endpoint === 'voice-config') json = await fixture.desk.bridgeConfig();
@@ -100,6 +100,19 @@ const origin = 'https://kioskx.crm.intelli-verse-x.ai';
     }
     await page.setViewportSize({width:1440,height:900});
     if (process.env.EVIDENCE_SCREENSHOT) await page.screenshot({path:process.env.EVIDENCE_SCREENSHOT,fullPage:true});
+    await page.getByRole('button', {name:'Calls',exact:true}).click();
+    await page.getByText('No transcript available.',{exact:true}).waitFor();
+    assert.match(await page.locator('.hired-call-steps').textContent(),/No transcript saved/);
+    const operation=[...fixture.rows.values()].find(row=>row.title.includes('unverified; no transcript'));
+    assert.ok(operation);
+    await fixture.desk.importVoiceTranscript(operation.id,'Synthetic conversation: Please send the venue details.','https://voice.google.com/fixture');
+    await page.getByText('Synthetic conversation: Please send the venue details.',{exact:true}).waitFor({timeout:45000});
+    assert.match(await page.locator('.hired-call-steps').textContent(),/Saved to inquiry/);
+    assert.equal(await page.getByText('No call summary available.',{exact:true}).isVisible(),true);
+    assert.equal(await page.getByText('No recording available for this inquiry.',{exact:true}).isVisible(),true);
+    assert.doesNotMatch(await page.locator('.hired-calls').innerText(),/https:\/\/voice|Call finished|Call complete/);
+    if (process.env.EVIDENCE_SCREENSHOT) await page.screenshot({path:process.env.EVIDENCE_SCREENSHOT,fullPage:true});
+    console.log('Calls: empty source stays empty; imported synthetic speech appears after refresh on same inquiry; recording and summary stay empty');
     ready=false;
     await connect.waitFor({timeout:20000});
     fixture.env.KIOSKX_HIRED_VOICE='false';
@@ -108,4 +121,4 @@ const origin = 'https://kioskx.crm.intelli-verse-x.ai';
     console.log(JSON.stringify({inquiryDesk:true,connectedThenDisconnected:true,encryptedHandoffs:handoffs,
       errorScreen:false,pageErrors:errors,mockedCalls:calls,realCalls:0}));
   } finally { await browser.close(); }
-})().catch(error => { console.error('Connect verification failed:', error.name, error.message); process.exitCode = 1; });
+})().catch(error => { console.error('Connect verification failed:', error.name, error.message, error.stack?.split('\n').filter(line=>line.includes('verify-connect.cjs')).join('\n')); process.exitCode = 1; });
