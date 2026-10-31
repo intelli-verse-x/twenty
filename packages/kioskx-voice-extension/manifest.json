@@ -1,0 +1,16 @@
+{
+  "manifest_version": 3,
+  "name": "KioskX inquiry calls",
+  "version": "1.0.1",
+  "description": "Connect the inquiry desk to the office Google Voice browser session.",
+  "permissions": ["storage", "scripting"],
+  "host_permissions": ["https://voice.google.com/*"],
+  "background": {"service_worker": "background.js", "type": "module"},
+  "content_scripts": [{
+    "matches": ["https://kioskx.crm.intelli-verse-x.ai/*"],
+    "js": ["desk.js"], "run_at": "document_idle"
+  }, {
+    "matches": ["https://voice.google.com/*"],
+    "js": ["privacy.js"], "run_at": "document_start"
+  }]
+}
