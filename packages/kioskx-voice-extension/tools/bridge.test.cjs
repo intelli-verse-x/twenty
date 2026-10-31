@@ -86,7 +86,7 @@ test('Calls stays empty without a source; imported speech is masked and scoped t
  await s.desk.bridge({action:'result',sessionId:s.sessionId,operationId:job.operationId,status:'opened'});
  assert.equal((await s.desk.voiceTranscripts(lead)).length,0);
  await s.desk.importVoiceTranscript(job.operationId,'Fixture conversation: Please send the details to person@example.test or +12025550123.','https://voice.google.com/fixture');
- const saved=await s.desk.voiceTranscripts(lead);
+ const saved=(await s.desk.leads()).leads[0].voiceTranscripts;
  assert.equal(saved.length,1);assert.match(saved[0].transcript,/Fixture conversation/);
  assert.doesNotMatch(JSON.stringify(saved),/person@|202555|voice.google.com|Source:|Call:/);
  assert.equal((await s.desk.voiceTranscripts('other')).length,0);
