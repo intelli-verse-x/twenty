@@ -93,3 +93,46 @@ it('does not capture an admin session or authorize the hired action for them', a
     ),
   ).rejects.toThrow();
 });
+
+it.each(['missing token', 'invalid token', 'other user', 'other workspace'])(
+  'rejects bridge access with %s before touching the service',
+  async (failure) => {
+    const desk = { bridgeConfig: jest.fn(), bridge: jest.fn() };
+    const api = new HiredDeskController(
+      tokens as unknown as AccessTokenService,
+      desk as unknown as HiredDeskService,
+    );
+    const request = {
+      headers: failure === 'missing token' ? {} : { authorization: 'Bearer fixture-token' },
+    } as Request;
+    if (failure === 'invalid token') tokens.validateToken.mockRejectedValue(new Error('Invalid token'));
+    else tokens.validateToken.mockResolvedValue({
+      user: { email: failure === 'other user' ? 'admin@example.test' : 'support@kiosk-x.ai' },
+      workspace: { id: failure === 'other workspace' ? 'another-workspace' : HIRED_WORKSPACE },
+    });
+    await expect(api.voiceConfig(request)).rejects.toThrow();
+    await expect(api.voiceBridge(request, { action: 'poll' })).rejects.toThrow();
+    expect(desk.bridgeConfig).not.toHaveBeenCalled();
+    expect(desk.bridge).not.toHaveBeenCalled();
+  },
+);
+
+it('allows a verified hired identity to pair and rejects oversized bridge payloads', async () => {
+  tokens.validateToken.mockResolvedValue({
+    user: { email: 'support@kiosk-x.ai' },
+    workspace: { id: HIRED_WORKSPACE },
+  });
+  const desk = {
+    bridgeConfig: jest.fn(async () => ({ enabled: true })),
+    bridge: jest.fn(async () => ({ status: 'connected' })),
+  };
+  const api = new HiredDeskController(
+    tokens as unknown as AccessTokenService,
+    desk as unknown as HiredDeskService,
+  );
+  const request = { headers: { authorization: 'Bearer fixture-token' } } as Request;
+  await expect(api.voiceConfig(request)).resolves.toEqual({ enabled: true });
+  await expect(api.voiceBridge(request, { action: 'connect' })).resolves.toEqual({ status: 'connected' });
+  await expect(api.voiceBridge(request, { publicKey: 'x'.repeat(5001) })).rejects.toThrow();
+  expect(desk.bridge).toHaveBeenCalledTimes(1);
+});

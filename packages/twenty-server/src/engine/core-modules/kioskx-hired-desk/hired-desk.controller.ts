@@ -57,12 +57,18 @@ export class HiredDeskController {
       throw new ForbiddenException();
     return this.desk.call(input.leadId, input.requestId);
   }
+  // This route validates its bearer token and hired/admin identity explicitly below.
+  // It has no GraphQL/REST middleware to populate request.workspace for a guard.
+  // oxlint-disable-next-line twenty/rest-api-methods-should-be-guarded
   @Get('voice-config')
   @Header('Cache-Control', 'no-store')
   async voiceConfig(@Req() request: Request) {
     await this.authorize(request);
     return this.desk.bridgeConfig();
   }
+  // This route validates its bearer token and hired/admin identity explicitly below.
+  // It has no GraphQL/REST middleware to populate request.workspace for a guard.
+  // oxlint-disable-next-line twenty/rest-api-methods-should-be-guarded
   @Post('voice-bridge')
   @Header('Cache-Control', 'no-store')
   async voiceBridge(@Req() request: Request, @Body() body: unknown) {
@@ -71,6 +77,9 @@ export class HiredDeskController {
       throw new ForbiddenException();
     return this.desk.bridge(body as Record<string, unknown>);
   }
+  // This route validates its bearer token and hired/admin identity explicitly below.
+  // It has no GraphQL/REST middleware to populate request.workspace for a guard.
+  // oxlint-disable-next-line twenty/rest-api-methods-should-be-guarded
   @Post('voice-transcript')
   @Header('Cache-Control', 'no-store')
   async voiceTranscript(@Req() request: Request, @Body() body: unknown) {

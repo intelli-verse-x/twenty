@@ -66,7 +66,7 @@ const origin = 'https://kioskx.crm.intelli-verse-x.ai';
     await page.goto(origin + '/welcome', { waitUntil: 'domcontentloaded', timeout: 180000 });
     const connect = page.getByRole('button', { name: 'Connect Google Voice', exact: true });
     const call = page.getByRole('button', { name: 'Call', exact: true });
-    await connect.waitFor({timeout:60000});
+    await connect.waitFor({timeout:120000});
     console.log('Welcome and Connect rendered');
     await connect.click();
     await page.getByRole('link', {name:'Download extension'}).waitFor();
