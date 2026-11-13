@@ -50,7 +50,7 @@ it('signed-out visitors keep the existing sign-in without records or requests', 
   ).not.toBeInTheDocument();
   expect(global.fetch).not.toHaveBeenCalled();
 });
-it('unlisted email gets only the sales-team line without queue reads', async () => {
+it('unlisted email keeps the CRM without queue reads', async () => {
   global.fetch = jest.fn(async (url) =>
     reply(
       String(url).includes('kioskx-hired-desk')
@@ -59,9 +59,10 @@ it('unlisted email gets only the sales-team line without queue reads', async () 
     ),
   ) as jest.Mock;
   render(tree());
+  expect(await screen.findByText('Existing Twenty sign-in')).toBeVisible();
   expect(
-    await screen.findByText('This desk is for the sales team.'),
-  ).toBeVisible();
+    screen.queryByText('This desk is for the sales team.'),
+  ).not.toBeInTheDocument();
   expect(screen.queryByRole('article')).not.toBeInTheDocument();
   expect((global.fetch as jest.Mock).mock.calls).toHaveLength(2);
 });

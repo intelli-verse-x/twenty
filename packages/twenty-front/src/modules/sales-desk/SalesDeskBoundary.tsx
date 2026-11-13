@@ -71,7 +71,7 @@ export const SalesDeskBoundary = ({ children }: { children: ReactNode }) => {
         {failed === token && <button onClick={signOut}>Sign out</button>}
       </main>
     );
-  if (!session.value.allowed) return <p>This desk is for the sales team.</p>;
+  if (!session.value.allowed) return children;
   return (
     <BaseThemeProvider>
       <SalesDesk
