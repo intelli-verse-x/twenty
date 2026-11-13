@@ -1,3 +1,4 @@
+import { SalesDeskModule } from './sales-desk/sales-desk.module';
 import { HiredDeskModule } from './kioskx-hired-desk/hired-desk.module';
 import { KioskxVoiceModule } from 'src/engine/core-modules/kioskx-voice/kioskx-voice.module';
 import { Module } from '@nestjs/common';
@@ -85,6 +86,7 @@ import { FileModule } from './file/file.module';
   imports: [
     KioskxVoiceModule,
     HiredDeskModule,
+    SalesDeskModule,
     EnvironmentModule,
     TwentyConfigModule.forRoot(),
     HealthModule,

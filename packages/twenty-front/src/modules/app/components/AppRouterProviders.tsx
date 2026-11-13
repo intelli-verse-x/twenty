@@ -1,3 +1,4 @@
+import { SalesDeskBoundary } from '@/sales-desk/SalesDeskBoundary';
 import { HiredDeskBoundary } from '@/kioskx-hired-desk/HiredDeskBoundary';
 import { AgentChatProvider } from '@/ai/components/AgentChatProvider';
 import { ApolloProvider } from '@/apollo/components/ApolloProvider';
@@ -100,6 +101,8 @@ const CrmRouterProviders = () => {
 
 export const AppRouterProviders = () => (
   <HiredDeskBoundary>
-    <CrmRouterProviders />
+    <SalesDeskBoundary>
+      <CrmRouterProviders />
+    </SalesDeskBoundary>
   </HiredDeskBoundary>
 );
