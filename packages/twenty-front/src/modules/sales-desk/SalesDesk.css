@@ -1,0 +1,39 @@
+@import '../kioskx-hired-desk/HiredDesk.css';
+
+.sales-desk .hired-nav {
+  display: block;
+  color: inherit;
+  text-decoration: none;
+  margin-top: 12px;
+}
+.sales-queue {
+  margin-bottom: 32px;
+}
+.sales-queue > .hired-list-toolbar h2 {
+  font-size: 16px;
+  margin: 0;
+}
+.sales-follow-up {
+  display: grid;
+  grid-template-columns: 132px minmax(0, 1fr);
+  gap: 9px 20px;
+  align-items: center;
+  margin: 16px 0;
+}
+.sales-follow-up select {
+  background: var(--t-background-primary, white);
+  color: inherit;
+  border: 1px solid var(--t-border-color-medium, #d6d6d6);
+  border-radius: 5px;
+  padding: 8px 10px;
+  font: inherit;
+}
+.sales-follow-up input {
+  min-width: 0;
+}
+@media (max-width: 720px) {
+  .sales-follow-up {
+    grid-template-columns: 90px minmax(0, 1fr);
+    gap: 8px 12px;
+  }
+}
