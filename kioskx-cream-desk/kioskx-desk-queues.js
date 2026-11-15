@@ -4,6 +4,7 @@
     cars: 'Cars',
     jobs: 'Jobs',
     turo: 'Turo',
+    kiosk: 'Kiosk',
   };
   let selected = '';
   let revision = 0;
@@ -279,14 +280,13 @@
         fleetNotice.textContent = 'No host booking list. Prices stay unchanged. Guest messages on Turo are not connected.';
         list.append(fleetNotice);
       } else {
-        const mail = document.createElement('p'); mail.textContent = 'Mailbox send is off.'; mail.className = 'hired-muted';
-        const send = button('Send'); send.disabled = true;
+        const mail = document.createElement('p'); mail.className = 'hired-muted';
         // Reuse the existing Voice script even when no Kiosk inquiry was opened first.
         const voiceSlot = document.createElement('section');
         voiceSlot.className = 'kx-voice-slot'; voiceSlot.hidden = true;
         const voiceAnchor = document.createElement('div'); voiceAnchor.className = 'hired-actions';
         voiceSlot.append(voiceAnchor);
-        const call = button('Call', () => {
+        const openVoice = () => {
           const box = document.querySelector('#kioskx-voice-connect');
           if (box) {
             if (!voiceHome) { voiceHome = document.createElement('span'); box.before(voiceHome); }
@@ -296,10 +296,26 @@
             voiceSlot.hidden = false;
             voiceSlot.tabIndex = -1; voiceSlot.scrollIntoView({ block: 'nearest' }); voiceSlot.focus();
           }
-        });
-        const sms = button('Text'); sms.disabled = true;
-        const smsNote = document.createElement('p'); smsNote.textContent = 'Text from this desk is not connected.'; smsNote.className = 'hired-muted';
-        controls.append(mail, send, call, sms, smsNote, voiceSlot);
+        };
+        const thread = document.createElement('section'); thread.className='kx-thread'; thread.setAttribute('aria-label','Reply thread');
+        const paintThread=()=>{thread.replaceChildren();for(const item of current.thread||[]){const row=document.createElement('p');row.style.whiteSpace='pre-wrap';row.textContent=new Date(item.time).toLocaleString()+' · '+item.message+(item.text?'\n'+item.text:'');thread.append(row);}};
+        paintThread();
+        let busy=false;
+        const action=async kind=>{
+          if(busy)return;busy=true;send.disabled=call.disabled=sms.disabled=true;
+          try{
+            if(kind!=='call'){await save({draft:field.value});if(current.draft!==field.value)throw Error();}
+            const response=await fetch('/kioskx-hired-desk/'+(kind==='call'?'call':'queue-send'),{method:'POST',headers:{Authorization:'Bearer '+token(),'Content-Type':'application/json'},body:JSON.stringify(kind==='call'?{leadId:current.id,requestId:crypto.randomUUID()}:{id:current.id,kind})});
+            if(!response.ok)throw Error();const result=await response.json();feedback.textContent=result.message;current.thread=result.thread||current.thread;paintThread();
+            if(result.status==='connect')openVoice();
+          }catch{feedback.textContent=kind==='email'?'Email outcome is unconfirmed. Refresh before trying again.':kind==='sms'?'Text outcome is unconfirmed. Refresh before trying again.':'Call outcome is unconfirmed. Refresh before trying again.';}
+          finally{busy=false;send.disabled=workUnavailable||!data.mailEnabled;call.disabled=workUnavailable;sms.disabled=workUnavailable||!data.smsEnabled;}
+        };
+        const send=button('Send',()=>action('email'));send.disabled=workUnavailable||!data.mailEnabled;
+        const call=button('Call',()=>action('call'));call.disabled=workUnavailable;
+        const sms=button('Text',()=>action('sms'));sms.disabled=workUnavailable||!data.smsEnabled;
+        const smsNote = document.createElement('p'); smsNote.textContent = data.smsEnabled ? '' : 'Text from this desk is not connected.'; smsNote.className = 'hired-muted';
+        controls.append(mail, send, call, sms, smsNote, thread, voiceSlot);
       }
       detail.append(controls);
       if (current.notice) {
@@ -312,6 +328,32 @@
     panel.append(list, detail);
   };
 
+  const paintKiosk = () => {
+    if(selected || !data?.queues?.kiosk)return;
+    const detail=document.querySelector('.hired-content:not(.kx-queue-panel) .hired-detail');
+    if(!detail)return;
+    const articles=[...detail.querySelectorAll('article')].filter(a=>a.querySelector('.hired-card-heading'));
+    for(const [index,article] of articles.entries()) {
+      if(article.querySelector('.kx-work'))continue;
+      const title=article.querySelector('.hired-card-heading h2')?.textContent?.trim();
+      const matches=data.queues.kiosk.rows.filter(r=>r.label===title);
+      const indexed=data.queues.kiosk.rows[index];
+      const current=indexed?.label===title?indexed:matches.length===1?matches[0]:null;
+      if(!current)continue;
+      const panel=document.createElement('div');const priorId=openId;
+      selected='kiosk';openId=current.id;renderPanel(panel);selected='';openId=priorId;
+      const controls=panel.querySelector('.kx-work');
+      // Keep the existing Kiosk card, notes and history. Only replace its action area.
+      for(const old of article.querySelectorAll('.hired-actions,.hired-compose')){old.hidden=true;old.style.display='none';}
+      for(const dd of article.querySelectorAll('.hired-fields > dd')) {
+        if(dd.previousElementSibling?.textContent==='Email')dd.textContent=current.email||'No email';
+        if(dd.previousElementSibling?.textContent==='Phone')dd.textContent=current.phone||'No phone';
+      }
+      controls.querySelector('textarea').id='kx-reply-'+current.id;
+      controls.querySelector('label').htmlFor='kx-reply-'+current.id;
+      (article.querySelector('.hired-card-main')||article).append(controls);
+    }
+  };
   const paint = () => {
     if (applying) return;
     const desk = document.querySelector('.hired-desk');
@@ -357,6 +399,7 @@
         title.textContent = 'Inquiries';
         delete title.dataset.kxQueue;
       }
+      paintKiosk();
       applying = false;
       return;
     }
