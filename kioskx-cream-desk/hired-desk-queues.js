@@ -1,3 +1,4 @@
+const reach = require('./reach');
 const { BadRequestException } = require('@nestjs/common');
 const { Client } = require('pg');
 const QUEUES = { cleaning: 'cleaning_request', cars: 'car_request', jobs: 'job_application' };
@@ -45,6 +46,7 @@ function row(record, queue) {
     description = [description, message ? sentence([`They wrote: ${message}`]) : 'No message was submitted.'].filter(Boolean).join(' ');
     return { id: String(record.id), label: text(record.name || 'Inquiry').slice(0, 200), service,
         summary: service || (queue === 'cars' ? val('vehicle') : '') || 'Inquiry', description,
+        country:text(record.country)||val('country')||val('phoneCountry')||val('countryCode'),
         email: text(record.email) || val('email'), phone: text(record.phone) || val('phone'),
         message, notice: queue === 'cars' ? 'This request does not reserve a car.' : '',
         status: 'New', draft: '', note: '' };
@@ -56,7 +58,7 @@ async function workspace(client) {
     return schema;
 }
 const connect = () => new Client({ connectionString: process.env.PG_DATABASE_URL, connectionTimeoutMillis: 5000, query_timeout: 8000 });
-async function queueBoard() {
+async function queueBoard(desk) {
     const client = connect();
     try {
         await client.connect();
@@ -68,6 +70,7 @@ async function queueBoard() {
             rows: found.rows.filter(r => r.kind === kind).map(r => row(r, key)).filter(Boolean), empty: 'No requests in this queue.',
         }]));
         queues.turo = fleet();
+        if(desk) queues.kiosk = {rows:await desk.system(async()=> (await desk.records()).map(r=>({id:r.person.id,label:r.label||'Inquiry',email:r.email,phone:r.phone,country:r.person.phones?.primaryPhoneCountryCode||r.person.phones?.primaryPhoneCallingCode,description:r.inquiry,summary:'Kiosk inquiry',queue:'kiosk',status:'New',draft:''})))};
         let workUnavailable = false;
         try {
             const work = await client.query(`SELECT inquiry_id, status, draft, note FROM ${schema}."_deskQueueWork"`);
@@ -75,13 +78,14 @@ async function queueBoard() {
             for (const queue of Object.values(queues)) for (const item of queue.rows) {
                 const saved = byId.get(item.id);
                 if (saved) Object.assign(item, { status: saved.status, draft: saved.draft, note: saved.note });
+                if (!item.id.startsWith('turo:')) item.thread = await reach.reconcile(reach.store(client,schema),item.id,desk);
             }
         } catch { workUnavailable = true; }
-        return { queues, workUnavailable, mailEnabled: false };
+        return { queues, workUnavailable, ...reach.capabilities() };
     } catch { return { unavailable: true, workUnavailable: true, queues: { turo: fleet() }, mailEnabled: false }; }
     finally { await client.end().catch(() => undefined); }
 }
-async function saveWork(input) {
+async function saveWork(input, desk) {
     if (!input || typeof input !== 'object' || typeof input.id !== 'string' ||
         Object.keys(input).some(k => !['id','status','draft','note'].includes(k)) ||
         Object.keys(input).length < 2 ||
@@ -99,7 +103,7 @@ async function saveWork(input) {
         if (!isFleet) {
             const found = await client.query(`SELECT id, name, kind, "requestDetailsMarkdown" FROM ${schema}."_anideebeeInquiry"
                 WHERE id = $1 AND "deletedAt" IS NULL AND kind = ANY($2)`, [input.id, Object.values(QUEUES)]);
-            if (!found.rows.length || isTestRecord(found.rows[0], requestMessage(found.rows[0].requestDetailsMarkdown)))
+            if ((!found.rows.length && !(desk && await desk.system(async()=>(await desk.records()).some(r=>r.person.id===input.id)))) || (found.rows.length && isTestRecord(found.rows[0], requestMessage(found.rows[0].requestDetailsMarkdown))))
                 throw new BadRequestException('Request is unavailable.');
         }
         // Only supplied fields change: saving a draft cannot revert a newer status.
@@ -120,13 +124,28 @@ async function guardedSend(send) {
     return send();
 }
 class QueueController {
-    async queues(request) { await this.authorize(request); return queueBoard(); }
-    async queueWork(request, body) { await this.authorize(request); return saveWork(body); }
-    async queueSend(request) { await this.authorize(request); return guardedSend(); }
+    async queues(request) { await this.authorize(request); return queueBoard(this.desk); }
+    async queueWork(request, body) { await this.authorize(request); return saveWork(body, this.desk); }
+    async queueSend(request, body) {
+        await this.authorize(request);
+        if(!body || !/^[a-f0-9-]{36}$/i.test(body.id||'') || !['email','sms','call'].includes(body.kind)) throw new BadRequestException('Invalid action.');
+        const board=await queueBoard(this.desk);
+        const entry=Object.entries(board.queues||{}).flatMap(([queue,q])=>q.rows.map(r=>({...r,queue}))).find(r=>r.id===body.id);
+        if(!entry || board.workUnavailable) throw new BadRequestException('Request is unavailable.');
+        return reach.withStore(async repo=>reach.act({...body,sessionId:reach.browserSession(request)}, {repo,record:entry,...await reach.transports(this.desk)}));
+    }
+    async call(request,body) { return QueueController.prototype.queueSend.call(this,request,{id:body?.leadId,kind:'call',requestId:body?.requestId}); }
+    async voiceBridge(request,body) {
+        await this.authorize(request);
+        if(!body || JSON.stringify(body).length>5000)throw new BadRequestException('Invalid session.');
+        const result=await this.desk.bridge(body);
+        if(body.action==='connect' && result.status==='connected') request.res.cookie('desk_voice',reach.cookie(body.sessionId),{httpOnly:true,secure:true,sameSite:'strict',path:'/kioskx-hired-desk',maxAge:20000});
+        return result;
+    }
 }
 exports.install = Controller => {
     const common = require('@nestjs/common');
-    for (const [name, route, verb] of [['queues','queues','Get'],['queueWork','queue-work','Post'],['queueSend','queue-send','Post']]) {
+    for (const [name, route, verb] of [['queues','queues','Get'],['queueWork','queue-work','Post'],['queueSend','queue-send','Post'],['call','call','Post'],['voiceBridge','voice-bridge','Post']]) {
         Object.defineProperty(Controller.prototype, name, Object.getOwnPropertyDescriptor(QueueController.prototype, name));
         const desc = Object.getOwnPropertyDescriptor(Controller.prototype, name);
         common[verb](route)(Controller.prototype, name, desc);
