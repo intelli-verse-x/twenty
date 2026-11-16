@@ -45,6 +45,8 @@ function row(record, queue) {
     else description = sentence([service]);
     description = [description, message ? sentence([`They wrote: ${message}`]) : 'No message was submitted.'].filter(Boolean).join(' ');
     return { id: String(record.id), label: text(record.name || 'Inquiry').slice(0, 200), service,
+        queue, when: record.receivedAt || null,
+        fields: (queue === 'cleaning' ? [['Service',service],['Bedrooms',val('bedrooms')],['Bathrooms',val('bathrooms')],['Size',val('size')],['ZIP',val('zip')],['Frequency',val('frequency')],['Date on the request',val('date')],['Laundry',val('laundryNotes')],['Message',message]] : queue === 'cars' ? [['Vehicle',val('vehicle')],['Purpose',val('purpose')],['Location',val('location')],['Duration',val('duration')],['Through',val('endDate')],['Company',val('company')],['Equipment',val('equipment')],['Message',message]] : [['Role',val('role') || service],['Message',message]]).filter(([,value]) => value !== ''),
         summary: service || (queue === 'cars' ? val('vehicle') : '') || 'Inquiry', description,
         country:text(record.country)||val('country')||val('phoneCountry')||val('countryCode'),
         email: text(record.email) || val('email'), phone: text(record.phone) || val('phone'),
@@ -64,14 +66,14 @@ async function queueBoard(desk) {
     try {
         await client.connect();
         const schema = await workspace(client);
-        const found = await client.query(`SELECT id, name, kind, "requestedService", email, phone, "requestDetailsMarkdown"
+        const found = await client.query(`SELECT id, name, kind, "requestedService", email, phone, "receivedAt", "requestDetailsMarkdown"
             FROM ${schema}."_anideebeeInquiry" WHERE "deletedAt" IS NULL AND kind = ANY($1)
             ORDER BY "receivedAt" DESC NULLS LAST`, [Object.values(QUEUES)]);
         const queues = Object.fromEntries(Object.entries(QUEUES).map(([key, kind]) => [key, {
             rows: found.rows.filter(r => r.kind === kind).map(r => row(r, key)).filter(Boolean), empty: 'No requests in this queue.',
         }]));
         queues.turo = fleet();
-        if(desk) queues.kiosk = {rows:await desk.system(async()=> (await desk.records()).map(r=>({id:r.person.id,label:r.label||'Inquiry',email:r.email,phone:r.phone,country:r.person.phones?.primaryPhoneCountryCode||r.person.phones?.primaryPhoneCallingCode,description:r.inquiry,summary:'Kiosk inquiry',queue:'kiosk',status:'New',draft:''})))};
+        if(desk) queues.kiosk = {rows:await desk.system(async()=> (await desk.records()).map(r=>({id:r.person.id,label:r.label||'Inquiry',email:r.email,phone:r.phone,country:r.person.phones?.primaryPhoneCountryCode||r.person.phones?.primaryPhoneCallingCode,description:r.inquiry,summary:'Kiosk inquiry',when:r.person.createdAt||null,queue:'kiosk',status:'New',draft:''})))};
         let workUnavailable = false;
         try {
             const work = await client.query(`SELECT inquiry_id, status, draft, note FROM ${schema}."_deskQueueWork"`);
@@ -95,7 +97,7 @@ async function saveWork(input, desk) {
         throw new BadRequestException('Invalid work update.');
     const isFleet = TURO.some(([id]) => id === input.id);
     if ((!isFleet && !/^[0-9a-f]{8}(?:-[0-9a-f]{4}){3}-[0-9a-f]{12}$/i.test(input.id)) ||
-        (isFleet && (input.status !== undefined || input.draft !== undefined)) || (!isFleet && input.note !== undefined))
+        (isFleet && (input.status !== undefined || input.draft !== undefined)))
         throw new BadRequestException('Invalid work update.');
     const client = connect();
     try {

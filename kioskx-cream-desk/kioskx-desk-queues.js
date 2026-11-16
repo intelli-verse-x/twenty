@@ -1,29 +1,4 @@
 (() => {
-  const NAMES = {
-    cleaning: 'Cleaning',
-    cars: 'Cars',
-    jobs: 'Jobs',
-    turo: 'Turo',
-    kiosk: 'Kiosk',
-  };
-  let selected = '';
-  let revision = 0;
-  let voiceHome = null;
-  const restoreVoice = () => {
-    const box = document.querySelector('#kioskx-voice-connect');
-    if (voiceHome?.isConnected && box) voiceHome.replaceWith(box);
-    voiceHome = null;
-  };
-  let openId = '';
-  let data = null;
-  let applying = false;
-  let savedNavigation = [];
-  const restoreNavigation = () => {
-    for (const [button, pressed] of savedNavigation) button.setAttribute('aria-pressed', pressed);
-    savedNavigation = [];
-  };
-  window.kxQueue = '';
-
   const style = document.createElement('style');
   style.textContent = `
     html:has(.hired-desk), body:has(.hired-desk), body:has(.hired-desk) #root {
@@ -72,489 +47,51 @@
   };
   paintLogin();
   new MutationObserver(paintLogin).observe(document.documentElement, { childList: true, subtree: true });
-  window.kxQueueCounts = null;
 
-  const token = () => {
-    try {
-      const saved = JSON.parse(localStorage.getItem('tokenPairState') || 'null');
-      return saved?.accessOrWorkspaceAgnosticToken?.token || '';
-    } catch {
-      return '';
-    }
-  };
-
-  const load = async () => {
-    const bearer = token();
-    if (!bearer) return;
-    const response = await fetch('/kioskx-hired-desk/queues', {
-      headers: { Authorization: `Bearer ${bearer}` },
-      cache: 'no-store',
-    });
-    if (!response.ok) throw new Error('unavailable');
-    data = await response.json();
-    revision++;
-    const counts = {};
-    for (const name of Object.keys(NAMES)) {
-      counts[name] = data?.queues?.[name]?.rows?.length ?? 0;
-    }
-    window.kxQueueCounts = data?.unavailable ? null : counts;
-    paint();
-  };
-
-  const paintCounts = () => {
-    const counts = window.kxQueueCounts;
-    if (!counts) return;
-    for (const name of Object.keys(NAMES)) {
-      const slot = document.querySelector(`[data-kx-count="${name}"]`);
-      if (slot && slot.textContent !== String(counts[name])) {
-        slot.textContent = String(counts[name]);
-      }
-    }
-  };
-
-  const safeActivityName = value => String(value || 'Inquiry')
-    .replace(/[^\s<>()[\],;:]*@[^\s<>()[\],;:]*/g, '[contact hidden]')
-    .replace(/\+?\d[\d ().-]{5,}\d/g, '[contact hidden]');
-  const paintToday = () => {
-    const workspace=document.querySelector('.hired-workspace');if(!workspace)return;
-    let box=workspace.querySelector('.kx-today');
-    if(!box){box=document.createElement('details');box.className='kx-today';box.append(document.createElement('summary'),document.createElement('div'));workspace.querySelector('.hired-toolbar')?.after(box);}
-    const now=new Date(), entries=[];
-    for(const [queue,q] of Object.entries(data?.queues||{}))for(const row of q.rows||[])for(const item of row.thread||[]){
-      const date=new Date(item.time);
-      if(date.toDateString()!==now.toDateString())continue;
-      if(!(['email','sms'].includes(item.kind)&&item.status==='sent') && !(item.kind==='call'&&['sent','queued','completed'].includes(item.status)))continue;
-      entries.push({queue,name:safeActivityName(row.label),kind:item.kind,status:item.status,time:date});
-    }
-    entries.sort((a,b)=>b.time-a.time);
-    const count=kind=>entries.filter(e=>e.kind===kind).length;
-    const summary=!data||data.unavailable||data.workUnavailable?'Today: activity unavailable.':!entries.length?'Today: nothing sent.':`Today: ${count('email')} emails, ${count('call')} calls, ${count('sms')} texts.`;
-    const lines=entries.map(e=>`${({cleaning:'Cleaning',cars:'Cars',jobs:'Jobs',kiosk:'Kiosk'})[e.queue]||'Inquiry'} — ${e.name} — ${e.kind==='email'?'Email sent':e.kind==='sms'?'Text sent':e.status==='queued'?'Call queued':'Call completed'} — ${e.time.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}`);
-    const stamp=JSON.stringify([summary,lines]);if(box.dataset.stamp===stamp)return;box.dataset.stamp=stamp;
-    box.querySelector('summary').textContent=summary;const list=box.querySelector('div');list.replaceChildren();
-    for(const line of lines){const row=document.createElement('p');row.textContent=line;list.append(row);}
-  };
-
-  const renderPanel = (panel) => {
-    const queue = data?.queues?.[selected] || (selected === 'turo' ? { rows: [
-      ['turo:c300','Mercedes C300'], ['turo:tesla-2023','2023 Tesla Model Y'],
-      ['turo:gls450','Mercedes GLS450'], ['turo:tesla-2027','2027 Tesla Model Y'],
-    ].map(([id,label]) => ({id,label,summary:'Own reminder',note:''})) } : null);
-    const workUnavailable = !data || Boolean(data.workUnavailable || data.unavailable);
-    const stamp = `${revision}:${selected}:${openId}:${queue?.rows?.length ?? 'x'}:${data?.unavailable ? 1 : 0}`;
-    if (panel.dataset.kxStamp === stamp) return;
-    panel.dataset.kxStamp = stamp;
-    restoreVoice();
-    panel.replaceChildren();
-    const list = document.createElement('section');
-    list.className = 'hired-list';
-    list.setAttribute('aria-label', NAMES[selected] || 'Queue');
-    const detail = document.createElement('section');
-    detail.className = 'hired-detail';
-    if (data?.unavailable && selected !== 'turo') {
-      const note = document.createElement('p');
-      note.className = 'hired-notice';
-      note.setAttribute('role', 'status');
-      note.textContent = 'This queue is unavailable. Try refreshing.';
-      detail.appendChild(note);
-    } else if (!queue || !queue.rows.length) {
-      if (queue && selected !== 'turo') {
-        const fresh = document.createElement('p'); fresh.className = 'hired-notice kx-new-count';
-        fresh.textContent = '0 still new'; list.append(fresh);
-      }
-      const note = document.createElement('p');
-      note.className = 'hired-notice';
-      note.textContent = selected === 'turo' ? 'The fleet report is not connected.' : (queue?.empty || (queue ? 'No requests in this queue.' : 'This queue is not connected.'));
-      detail.appendChild(note);
-    } else {
-      const fresh = document.createElement('p');
-      fresh.className = 'hired-notice kx-new-count';
-      const updateCount = () => { fresh.textContent = `${queue.rows.filter(r => (r.status || 'New') === 'New').length} still new`; };
-      if (selected !== 'turo') { updateCount(); list.appendChild(fresh); }
-      const current = queue.rows.find((item) => item.id === openId) || queue.rows[0];
-      openId = current.id;
-      for (const item of queue.rows) {
-        const button = document.createElement('button');
-        button.className = 'hired-row';
-        button.type = 'button';
-        button.setAttribute('aria-pressed', item.id === openId ? 'true' : 'false');
-        button.addEventListener('click', () => {
-          openId = item.id;
-          panel.dataset.kxStamp = '';
-          renderPanel(panel);
-        });
-        const avatar = document.createElement('span');
-        avatar.className = 'hired-avatar';
-        avatar.setAttribute('aria-hidden', 'true');
-        avatar.textContent = (item.label || '?').slice(0, 1).toUpperCase();
-        const copy = document.createElement('span');
-        copy.className = 'hired-row-copy';
-        const name = document.createElement('strong');
-        name.textContent = item.label;
-        const sub = document.createElement('span');
-        sub.textContent = item.summary || item.service || 'Inquiry';
-        copy.append(name, sub);
-        button.append(avatar, copy);
-        list.appendChild(button);
-      }
-      const heading = document.createElement('div');
-      heading.className = 'hired-card-heading';
-      const avatar = document.createElement('span');
-      avatar.className = 'hired-avatar';
-      avatar.textContent = current.label.slice(0, 1).toUpperCase();
-      const title = document.createElement('h2');
-      title.textContent = current.label;
-      heading.append(avatar, title);
-      const info = document.createElement('section');
-      info.className = 'hired-info';
-      const fields = document.createElement('dl');
-      fields.className = 'hired-fields';
-      const add = (label, value) => {
-        const dt = document.createElement('dt');
-        dt.textContent = label;
-        const dd = document.createElement('dd');
-        dd.className = 'hired-number';
-        dd.textContent = value || '—';
-        fields.append(dt, dd);
-      };
-
-      if (selected !== 'turo') {
-        add('Email', current.email || 'No email');
-        add('Phone', current.phone || 'No phone');
-        if (current.when) add('Received', new Date(current.when).toLocaleString());
-      }
-
-      info.appendChild(fields);
-      detail.append(heading);
-      if (selected !== 'turo') {
-        const description = document.createElement('p');
-        description.className = 'hired-request-description';
-        description.textContent = current.description || current.service || '';
-        detail.append(description, info);
-      }
-      const message = document.createElement('p');
-      message.className = 'hired-request-message';
-      message.style.whiteSpace = 'pre-wrap';
-      message.style.overflowWrap = 'anywhere';
-      message.textContent = current.message || 'No message was submitted.';
-      if (selected !== 'turo') detail.appendChild(message);
-      const controls = document.createElement('section');
-      controls.className = 'hired-info kx-work';
-      const feedback = document.createElement('p');
-      feedback.className = 'hired-muted';
-      feedback.setAttribute('role', 'status');
-      if (workUnavailable) feedback.textContent = 'Work status is unavailable.';
-      const button = (label, fn) => {
-        const b = document.createElement('button');
-        b.type = 'button'; b.textContent = label;
-        b.className = 'hired-potential-filter';
-        b.style.cssText = 'font:inherit;width:auto;display:inline-flex;padding:10px 12px;margin-right:8px';
-        if (fn) b.addEventListener('click', fn);
-        return b;
-      };
-      const savingButtons = [];
-      const save = async patch => {
-        const id = current.id;
-        savingButtons.forEach(b => b.disabled = true);
-        feedback.textContent = 'Saving…';
-        try {
-          const response = await fetch('/kioskx-hired-desk/queue-work', {
-            method: 'POST', headers: { Authorization: `Bearer ${token()}`, 'Content-Type': 'application/json' },
-            body: JSON.stringify({ id, ...patch }),
-          });
-          if (!response.ok) throw new Error('unavailable');
-          const result = await response.json();
-          if (!result.saved) throw new Error('unavailable');
-          Object.assign(current, result.work);
-          for (const b of controls.querySelectorAll('[data-status]')) b.setAttribute('aria-pressed', b.dataset.status === current.status ? 'true' : 'false');
-          updateCount();
-          feedback.textContent = 'Saved.';
-        } catch { feedback.textContent = 'Work status is unavailable. Your changes have not been saved.'; }
-        finally { savingButtons.forEach(b => b.disabled = workUnavailable); }
-      };
-      if (selected !== 'turo') {
-        const statuses = document.createElement('div');
-        statuses.setAttribute('role', 'group'); statuses.setAttribute('aria-label', 'Next step');
-        statuses.style.display = 'flex'; statuses.style.flexWrap = 'wrap';
-        for (const status of ['New','Call next','Waiting','Done']) {
-          const b = button(status, () => save({ status }));
-          b.dataset.status = status;
-          b.setAttribute('aria-pressed', (current.status || 'New') === status ? 'true' : 'false');
-          statuses.append(b); savingButtons.push(b);
-        }
-        controls.append(statuses);
-      }
-      const label = document.createElement('label');
-      const field = document.createElement('textarea');
-      const fleetNote = selected === 'turo';
-      field.id = fleetNote ? 'kx-note' : 'kx-reply';
-      label.htmlFor = field.id; label.textContent = fleetNote ? 'Note' : 'Reply';
-      field.value = (fleetNote ? current.note : current.draft) || '';
-      field.rows = 4; field.maxLength = 10000;
-      field.style.cssText = 'display:block;box-sizing:border-box;width:100%;font:inherit;color:inherit;background:transparent;border:1px solid #d9cbb5;border-radius:8px;padding:10px;margin:8px 0';
-      field.disabled = workUnavailable;
-      const saveButton = button(fleetNote ? 'Save note' : 'Save draft', () => save(fleetNote ? { note: field.value } : { draft: field.value }));
-      savingButtons.push(saveButton);
-      if(selected==='cleaning') {
-        const reminderRow=document.createElement('div');
-        const time=document.createElement('input');time.type='text';time.placeholder='Appointment time';time.setAttribute('aria-label','Appointment time');time.maxLength=80;
-        time.style.cssText='font:inherit;color:inherit;background:transparent;border:1px solid #d9cbb5;border-radius:8px;padding:10px;max-width:100%;box-sizing:border-box';
-        const reminder=button('Appointment reminder',()=>{
-          const value=time.value.trim();
-          field.value=value?`You have an appointment tomorrow at ${value}.`+(current.appointmentDate?` Date on the request: ${current.appointmentDate}.`:''):'Add the appointment time, then use Appointment reminder.';
-          field.focus();
-        });
-        reminder.disabled=workUnavailable;time.disabled=workUnavailable;
-        reminderRow.append(reminder,time);controls.append(reminderRow);
-      }
-      controls.append(label, field, saveButton, feedback);
-      savingButtons.forEach(b => b.disabled = workUnavailable);
-      if (fleetNote) {
-        const note = document.createElement('p'); note.className = 'hired-muted';
-        note.textContent = 'Your own reminder. This note is not sent to a guest.';
-        controls.append(note);
-        const fleetNotice = document.createElement('p'); fleetNotice.className = 'hired-muted';
-        fleetNotice.textContent = 'No host booking list. Prices stay unchanged. Guest messages on Turo are not connected.';
-        list.append(fleetNotice);
-      } else {
-        const mail = document.createElement('p'); mail.className = 'hired-muted';
-        // Reuse the existing Voice script even when no Kiosk inquiry was opened first.
-        const voiceSlot = document.createElement('section');
-        voiceSlot.className = 'kx-voice-slot'; voiceSlot.hidden = true;
-        const voiceAnchor = document.createElement('div'); voiceAnchor.className = 'hired-actions';
-        voiceSlot.append(voiceAnchor);
-        const openVoice = () => {
-          const box = document.querySelector('#kioskx-voice-connect');
-          if (box) {
-            if (!voiceHome) { voiceHome = document.createElement('span'); box.before(voiceHome); }
-            controls.append(box); box.hidden = false; box.tabIndex = -1;
-            box.scrollIntoView({ block: 'nearest' }); box.focus();
-          } else {
-            voiceSlot.hidden = false;
-            voiceSlot.tabIndex = -1; voiceSlot.scrollIntoView({ block: 'nearest' }); voiceSlot.focus();
-          }
-        };
-        const thread = document.createElement('section'); thread.className='kx-thread'; thread.setAttribute('aria-label','Reply thread');
-        const paintThread=()=>{thread.replaceChildren();for(const item of current.thread||[]){const row=document.createElement('p');row.style.whiteSpace='pre-wrap';row.textContent=new Date(item.time).toLocaleString()+' · '+item.message+(item.text?'\n'+item.text:'');thread.append(row);}};
-        paintThread();
-        let busy=false;
-        const action=async kind=>{
-          if(busy)return;busy=true;send.disabled=call.disabled=sms.disabled=true;
-          try{
-            if(kind!=='call'){await save({draft:field.value});if(current.draft!==field.value)throw Error();}
-            const response=await fetch('/kioskx-hired-desk/'+(kind==='call'?'call':'queue-send'),{method:'POST',headers:{Authorization:'Bearer '+token(),'Content-Type':'application/json'},body:JSON.stringify(kind==='call'?{leadId:current.id,requestId:crypto.randomUUID()}:{id:current.id,kind})});
-            if(!response.ok)throw Error();const result=await response.json();feedback.textContent=result.message;current.thread=result.thread||current.thread;paintThread();paintToday();
-            if(result.status==='connect')openVoice();
-          }catch{feedback.textContent=kind==='email'?'Email outcome is unconfirmed. Refresh before trying again.':kind==='sms'?'Text outcome is unconfirmed. Refresh before trying again.':'Call outcome is unconfirmed. Refresh before trying again.';}
-          finally{busy=false;send.disabled=workUnavailable||!data.mailEnabled;call.disabled=workUnavailable;sms.disabled=workUnavailable||!data.smsEnabled;}
-        };
-        const send=button('Send',()=>action('email'));send.disabled=workUnavailable||!data.mailEnabled;
-        const call=button('Call',()=>action('call'));call.disabled=workUnavailable;
-        const sms=button('Text',()=>action('sms'));sms.disabled=workUnavailable||!data.smsEnabled;
-        const smsNote = document.createElement('p'); smsNote.textContent = data.smsEnabled ? '' : 'Text from this desk is not connected.'; smsNote.className = 'hired-muted';
-        controls.append(mail, send, call, sms, smsNote, thread, voiceSlot);
-      }
-      detail.append(controls);
-      if (current.notice) {
-        const notice = document.createElement('p');
-        notice.className = 'hired-notice';
-        notice.textContent = current.notice;
-        detail.appendChild(notice);
-      }
-    }
-    panel.append(list, detail);
-  };
-
-  const paintKiosk = () => {
-    if(selected || !data?.queues?.kiosk)return;
-    const detail=document.querySelector('.hired-content:not(.kx-queue-panel) .hired-detail');
-    if(!detail)return;
-    const articles=[...detail.querySelectorAll('article')].filter(a=>a.querySelector('.hired-card-heading'));
-    for(const [index,article] of articles.entries()) {
-      if(article.querySelector('.kx-work'))continue;
-      const title=article.querySelector('.hired-card-heading h2')?.textContent?.trim();
-      const matches=data.queues.kiosk.rows.filter(r=>r.label===title);
-      const indexed=data.queues.kiosk.rows[index];
-      const current=indexed?.label===title?indexed:matches.length===1?matches[0]:null;
-      if(!current)continue;
-      const panel=document.createElement('div');const priorId=openId;
-      selected='kiosk';openId=current.id;renderPanel(panel);selected='';openId=priorId;
-      const controls=panel.querySelector('.kx-work');
-      // Keep the existing Kiosk card, notes and history. Only replace its action area.
-      for(const old of article.querySelectorAll('.hired-actions,.hired-compose')){old.hidden=true;old.style.display='none';}
-      for(const dd of article.querySelectorAll('.hired-fields > dd')) {
-        if(dd.previousElementSibling?.textContent==='Email')dd.textContent=current.email||'No email';
-        if(dd.previousElementSibling?.textContent==='Phone')dd.textContent=current.phone||'No phone';
-      }
-      controls.querySelector('textarea').id='kx-reply-'+current.id;
-      controls.querySelector('label').htmlFor='kx-reply-'+current.id;
-      (article.querySelector('.hired-card-main')||article).append(controls);
-    }
-  };
-  const paint = () => {
-    if (applying) return;
-    const desk = document.querySelector('.hired-desk');
-    if (!desk) return;
-    applying = true;
-    paintCounts();
-    paintToday();
-    for (const name of Object.keys(NAMES)) {
-      const match = [...desk.querySelectorAll('nav[aria-label="Queues"] button')].find(
-        (item) => item.textContent.trim().startsWith(NAMES[name]),
-      );
-      if (match) {
-        match.classList.remove('hired-nav');
-        match.classList.add('hired-potential-filter');
-        match.setAttribute('aria-pressed', selected === name ? 'true' : 'false');
-      }
-    }
-    const all = desk.querySelector('nav[aria-label="Views"] button');
-    if (all) {
-      all.style.background = selected || all.getAttribute('aria-pressed') !== 'true' ? 'transparent' : '';
-      if (selected) all.setAttribute('aria-pressed', 'false');
-    }
-    if (selected) {
-      for (const filter of desk.querySelectorAll('nav[aria-label="Lead potential filters"] button')) {
-        filter.setAttribute('aria-pressed', 'false');
-      }
-    }
-    const workspace = desk.querySelector('.hired-workspace');
-    ensureInbox(desk);
-    const inboxButton = desk.querySelector('[data-kx-inbox]');
-    if (inboxButton) {
-      inboxButton.className = 'hired-potential-filter';
-      inboxButton.setAttribute('aria-pressed', selected === 'inbox' ? 'true' : 'false');
-    }
-    const inboxPanel = workspace?.querySelector('.kx-inbox-panel');
-    if (inboxPanel) inboxPanel.hidden = selected !== 'inbox';
-    const today = workspace?.querySelector('.kx-today');
-    if (today) today.hidden = selected === 'inbox';
-    if (selected === 'inbox') {
-      for (const notice of workspace?.querySelectorAll(':scope > .hired-notice') || []) {
-        notice.hidden = true; notice.style.display = 'none';
-      }
-      const content = workspace?.querySelector('.hired-content:not(.kx-queue-panel):not(.kx-inbox-panel)');
-      const title = workspace?.querySelector('.hired-toolbar h1');
-      const search = workspace?.querySelector('.hired-toolbar input');
-      const summary = workspace?.querySelector('.hired-toolbar .hired-count');
-      if (summary) summary.hidden = true;
-      if (content) { content.hidden = true; content.style.display = 'none'; }
-      if (search) search.hidden = true;
-      workspace?.querySelector('.kx-queue-panel')?.remove();
-      if (title && title.textContent !== 'Inbox') { title.dataset.kxQueue = 'inbox'; title.textContent = 'Inbox'; }
-      let frameHost = workspace?.querySelector('.kx-inbox-panel');
-      if (!frameHost && workspace) {
-        frameHost = document.createElement('div');
-        frameHost.className = 'hired-content kx-inbox-panel';
-        const frame = document.createElement('iframe');
-        frame.title = 'Inbox';
-        frame.src = 'https://inbox.intelli-verse-x.ai/';
-        frameHost.append(frame);
-        workspace.appendChild(frameHost);
-      }
-      if (frameHost) frameHost.hidden = false;
-      applying = false;
-      return;
-    }
-    for (const notice of workspace?.querySelectorAll(':scope > .hired-notice') || []) {
-      notice.hidden = Boolean(selected); notice.style.display = selected ? 'none' : '';
-    }
-    const content = workspace?.querySelector('.hired-content:not(.kx-queue-panel)');
-    const title = workspace?.querySelector('.hired-toolbar h1');
-    const search = workspace?.querySelector('.hired-toolbar input');
-    const summary = workspace?.querySelector('.hired-toolbar .hired-count');
-    if (summary) summary.hidden = Boolean(selected);
-    let panel = workspace?.querySelector('.kx-queue-panel');
-    if (!selected) {
-      if (content) { content.hidden = false; content.style.removeProperty('display'); }
-      if (search) search.hidden = false;
-      restoreVoice();
-      if (panel) panel.remove();
-      if (title?.dataset.kxQueue) {
-        title.textContent = 'Inquiries';
-        delete title.dataset.kxQueue;
-      }
-      paintKiosk();
-      applying = false;
-      return;
-    }
-    if (content) { content.hidden = true; content.style.display = 'none'; }
-    if (search) search.hidden = true;
-    if (title && title.textContent !== NAMES[selected]) {
-      title.dataset.kxQueue = selected;
-      title.textContent = NAMES[selected];
-    }
-    if (!panel && workspace) {
-      panel = document.createElement('div');
-      panel.className = 'hired-content kx-queue-panel';
-      workspace.appendChild(panel);
-    }
-    if (panel) renderPanel(panel);
-    applying = false;
-  };
-
-  const ensureInbox = (desk) => {
-    if (desk.querySelector('[data-kx-inbox]')) return;
-    const nav = document.createElement('nav');
-    nav.setAttribute('aria-label', 'Inbox');
-    const button = document.createElement('button');
-    button.type = 'button';
-    button.dataset.kxInbox = 'open';
-    button.className = 'hired-potential-filter';
-    button.textContent = 'Inbox';
-    button.addEventListener('click', (event) => {
-      event.preventDefault();
-      event.stopPropagation();
-      window.kxOpenQueue('inbox');
-    });
-    nav.append(button);
-    const views = desk.querySelector('nav[aria-label="Views"]');
-    if (views) views.before(nav);
-  };
-
-  window.kxOpenQueue = (name) => {
-    const known = name === 'inbox' || Boolean(NAMES[name]);
-    if (known && !selected) {
-      savedNavigation = [...document.querySelectorAll('nav[aria-label="Views"] button, nav[aria-label="Lead potential filters"] button')].map(button => [button, button.getAttribute('aria-pressed') || 'false']);
-    } else if (!known) restoreNavigation();
-    selected = known ? name : '';
-    openId = '';
-    window.kxQueue = selected;
-    paint();
-  };
-
-  document.addEventListener(
-    'click',
-    (event) => {
-      const inquiry = event.target.closest(
-        'nav[aria-label="Views"] button, nav[aria-label="Lead potential filters"] button, .hired-filter-chips button',
-      );
-      if (!inquiry || !selected) return;
-      restoreNavigation();
-      selected = '';
-      openId = '';
-      window.kxQueue = '';
-      queueMicrotask(paint);
-    },
-    true,
-  );
-
-  const watch = new MutationObserver(() => paint());
-  const start = () => {
-    const desk = document.querySelector('.hired-desk');
-    if (!desk) return false;
-    watch.observe(desk, { childList: true, subtree: true, characterData: true });
-    paint();
-    load().catch(() => {
-      data = { unavailable: true };
-      paint();
-    });
-    return true;
-  };
-  if (!start()) {
-    const boot = new MutationObserver(() => {
-      if (start()) boot.disconnect();
-    });
-    boot.observe(document.documentElement, { childList: true, subtree: true });
-  }
+const names={inbox:'Inbox',cleaning:'Cleaning',cars:'Cars',jobs:'Jobs',kiosk:'Kiosk',today:'Today'};
+let data=null,queue='inbox',open='',host=null,busy=false;
+const token=()=>{try{return JSON.parse(localStorage.getItem('tokenPairState')).accessOrWorkspaceAgnosticToken.token;}catch{return '';}};
+const api=async(path,body)=>{const r=await fetch('/kioskx-hired-desk/'+path,{method:body?'POST':'GET',cache:'no-store',headers:{Authorization:'Bearer '+token(),...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{})});if(!r.ok)throw Error('Unavailable');return r.json();};
+const el=(tag,cls,text)=>{const e=document.createElement(tag);if(cls)e.className=cls;if(text!==undefined)e.textContent=text;return e;};
+const clean=v=>String(v??'').replace(/[^\s<>()[\],;:]*@[^\s<>()[\],;:]*/g,'[contact hidden]').replace(/\+?\d[\d ().-]{6,}\d/g,'[contact hidden]');
+const displayName=r=>{const raw=String(r.label||'');const value=r.queue==='kiosk'?raw.split(/\b(?:Email|Phone|City|Message|SMS)\s*(?:\(|:|\/)/i)[0].trim():raw;return clean(value||(r.queue==='kiosk'?'Kiosk inquiry':'Inquiry'));};
+const rows=()=>Object.entries(data?.queues||{}).filter(([k])=>['cleaning','cars','jobs','kiosk'].includes(k)).flatMap(([k,q])=>(q.rows||[]).map(r=>({...r,queue:k})));
+const time=v=>v&&!isNaN(new Date(v))?new Date(v).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'}):'';
+const chip=s=>el('span','sd-chip sd-'+s.toLowerCase().replace(' ','-'),s);
+const button=(text,fn,cls='')=>{const b=el('button',cls,text);b.type='button';b.onclick=fn;return b;};
+const unavailable=()=>!data||data.unavailable||data.workUnavailable||data.queues?.[queue]?.unavailable;
+function activity(){return rows().flatMap(r=>(r.thread||[]).filter(t=>new Date(t.time).toDateString()===new Date().toDateString()&&((['email','sms'].includes(t.kind)&&t.status==='sent')||(t.kind==='call'&&['sent','queued','completed'].includes(t.status)))).map(t=>({...t,row:r}))).sort((a,b)=>new Date(b.time)-new Date(a.time));}
+function today(expanded=false){const a=activity(),box=el('details','sd-today');box.open=expanded;const n=k=>a.filter(t=>t.kind===k).length;box.append(el('summary','',unavailable()?'Today: activity unavailable.':a.length?`Today: ${n('email')} emails, ${n('call')} calls, ${n('sms')} texts.`:'Today: nothing sent.'));for(const t of a)box.append(el('p','',`${names[t.row.queue]} — ${displayName(t.row)} — ${t.kind==='email'?'Email sent':t.kind==='sms'?'Text sent':t.status==='queued'?'Call queued':'Call completed'} — ${time(t.time)}`));return box;}
+function legend(){const card=el('section','sd-card sd-legend');card.append(el('h3','','STATUS MEANING'));for(const [s,d]of [['New','Not contacted'],['Call next','You still need to call'],['Waiting','Waiting on them'],['Done','Finished']]){const p=el('p');p.append(chip(s),el('span','',d));card.append(p);}card.append(el('p','sd-muted','These chips do not send anything.'));return card;}
+function fields(title,pairs,cls=''){const card=el('section','sd-card '+cls);card.append(el('h3','',title));const dl=el('dl');for(const [k,v]of pairs){dl.append(el('dt','',k),el('dd','',v));}card.append(dl);return card;}
+function render(){if(!host)return;const voice=document.querySelector('#kioskx-voice-connect');if(voice&&host.contains(voice))document.querySelector('.hired-desk').append(voice);host.replaceChildren();const all=rows();const current=all.find(r=>r.id===open);host.classList.toggle('sd-open',!!current);const rail=el('aside','sd-rail');rail.append(el('h2','','KioskX'),el('p','sd-brand','SUPPORT DESK'));const nav=el('nav');for(const [k,n]of Object.entries(names)){const b=button(n,()=>{if(busy)return;queue=k;open='';window.kxQueue=k;render();});b.setAttribute('aria-pressed',String(k===queue));b.append(el('span','',k==='today'?activity().length:k==='inbox'?all.length:all.filter(r=>r.queue===k).length));nav.append(b);}rail.append(nav);host.append(rail);
+const list=el('section','sd-list');list.setAttribute('aria-label','Request list');list.append(el('h1','',names[queue]),today(!current));const subset=queue==='inbox'?all:queue==='today'?[]:all.filter(r=>r.queue===queue);
+if(data?.unavailable||data?.queues?.[queue]?.unavailable)list.append(el('p','sd-card','This queue is unavailable. Try refreshing.'));else if(!subset.length&&queue!=='today')list.append(el('p','sd-card',data?'No requests in this queue.':'Loading requests…'));
+for(const r of subset){const b=button('',()=>{if(busy)return;open=r.id;render();},'sd-row');b.setAttribute('aria-pressed',String(r.id===open));const name=displayName(r);b.append(el('span','sd-avatar',name[0].toUpperCase()));const copy=el('span','sd-row-copy');const line=el('span');line.append(el('strong','',name),el('small','',names[r.queue]));copy.append(line,el('span','sd-preview',clean(r.summary||r.message||'Inquiry')));const end=el('span','sd-row-end');end.append(el('time','',time(r.when)),chip(r.status||'New'));b.append(copy,end);list.append(b);}list.append(legend());host.append(list);if(current)detail(current);}
+function detail(r){const privateKiosk=r.queue==='kiosk',safe=v=>privateKiosk?clean(v):String(v??'');const center=el('section','sd-center');const voiceAnchor=el('div','hired-actions');voiceAnchor.hidden=true;center.append(voiceAnchor);center.setAttribute('aria-label','Open request');const heading=el('header','sd-heading');heading.append(el('h2','',displayName(r)),chip(r.status||'New'),el('span','sd-chip',names[r.queue]));center.append(heading);
+const pairs=r.fields?.length?r.fields: [['Message',r.message||(privateKiosk?r.description:'')||'No message was submitted.']];center.append(fields('WHAT THEY ASKED',pairs.map(([k,v])=>[k,safe(v)])));if(r.queue==='cars')center.append(el('p','sd-muted','This request does not reserve a car.'));center.append(el('h3','sd-section-title','CONVERSATION'));
+const conversation=el('div','sd-conversation');const bubble=(label,text,cls='',stamp='')=>{const box=el('article','sd-card sd-message '+cls);const h=el('header');h.append(el('strong','',label),el('time','',time(stamp)));box.append(h,el('p','',safe(text)));return box;};
+const paintThread=()=>{conversation.replaceChildren();conversation.append(bubble(displayName(r),r.message||(privateKiosk?r.description:'')||'No message was submitted.','',r.when));for(const t of r.thread||[]){const sent=t.status==='sent';const label=t.kind==='email'?`You (${privateKiosk?'KioskX':'AniDeeBee'}) · Email`:t.kind==='sms'?'You · Text':t.kind==='note'?'Private note. Not sent.':'You · Call';conversation.append(bubble(label,(sent?t.text:[t.message,t.text].filter(Boolean).join('\n'))||t.message,t.kind==='note'?'sd-note':'sd-outgoing',t.time));}if(r.note)conversation.append(bubble('Private note. Not sent.',r.note,'sd-note'));};paintThread();center.append(conversation);
+const composer=el('section','sd-card sd-composer'),tabs=el('div','sd-tabs'),field=el('textarea');field.setAttribute('aria-label','Reply');field.value=r.draft||'';field.maxLength=10000;let tab='Reply',draft=field.value,note=r.note||'';const feedback=el('p','sd-feedback');feedback.setAttribute('role','status');const blocked=unavailable();
+const controls=[];
+const status=el('select','sd-chip');status.setAttribute('aria-label','Next step');for(const value of ['New','Call next','Waiting','Done']){const o=el('option','',value);o.value=value;status.append(o);}status.value=r.status||'New';status.className=chip(status.value).className;heading.querySelector('.sd-chip').replaceWith(status);controls.push(status);
+status.onchange=async()=>{if(busy)return;busy=true;lock();try{await save({status:status.value});status.className=chip(status.value).className;feedback.textContent='Next step saved. Nothing sent.';for(const b of host.querySelectorAll('.sd-row'))if(b.getAttribute('aria-pressed')==='true')b.querySelector('.sd-chip').replaceWith(chip(status.value));}catch{status.value=r.status||'New';feedback.textContent='Next step has not been saved.';}finally{busy=false;lock();}};
+const save=async patch=>{const result=await api('queue-work',{id:r.id,...patch});if(!result.saved)throw Error('Save failed');Object.assign(r,result.work);const original=data.queues[r.queue].rows.find(x=>x.id===r.id);Object.assign(original,result.work);};
+const saveButton=button('Save private note',async()=>{if(busy)return;busy=true;lock();try{await save({note:field.value});note=field.value;feedback.textContent='Private note saved. Not sent.';paintThread();}catch{feedback.textContent='Your note has not been saved. Try again.';}finally{busy=false;lock();}});saveButton.hidden=true;
+for(const t of ['Reply','Private note','Email']){const b=button(t,()=>{if(tab==='Private note')note=field.value;else draft=field.value;tab=t;field.value=t==='Private note'?note:draft;field.setAttribute('aria-label',t);saveButton.hidden=t!=='Private note';for(const x of tabs.children)x.setAttribute('aria-selected',String(x===b));lock();});b.setAttribute('role','tab');b.setAttribute('aria-selected',String(t==='Reply'));tabs.append(b);controls.push(b);}tabs.setAttribute('role','tablist');composer.append(tabs,field,saveButton);controls.push(field,saveButton);
+if(r.queue==='cleaning'){const row=el('div','sd-reminder'),label=el('label','','Appointment time'),input=el('input');input.setAttribute('aria-label','Appointment time');input.placeholder='10:30 AM';input.maxLength=80;const b=button('Appointment reminder',()=>{const value=input.value.trim();if(tab==='Private note'){note=field.value;tab='Reply';saveButton.hidden=true;for(const x of tabs.children)x.setAttribute('aria-selected',String(x.textContent==='Reply'));}field.value=value?`You have an appointment tomorrow at ${value}.${r.appointmentDate?' Date on the request: '+r.appointmentDate+'.':''}`:'Add the appointment time, then use Appointment reminder.';draft=field.value;field.setAttribute('aria-label','Reply');lock();});label.append(input);row.append(label,b);composer.append(row,el('p','sd-muted','Fills the reply. Does not send.'));controls.push(input,b);}
+center.append(composer,el('p','sd-instruction','Read the request. Write the reply. Then Email, Call, or Text. Nothing is sent until you press one of those.'));
+const actions=el('div','sd-actions');const action=async kind=>{if(busy||blocked||tab==='Private note')return;busy=true;lock();try{if(kind!=='call')await save({draft:field.value});const result=await api(kind==='call'?'call':'queue-send',kind==='call'?{leadId:r.id,requestId:crypto.randomUUID()}:{id:r.id,kind});feedback.textContent=safe(result.message);r.thread=result.thread||r.thread;data.queues[r.queue].rows.find(x=>x.id===r.id).thread=r.thread;paintThread();if(result.status==='connect'){const box=document.querySelector('#kioskx-voice-connect');if(box){center.append(box);box.hidden=false;box.scrollIntoView({block:'nearest'});}}}catch{feedback.textContent='Outcome is unconfirmed. Refresh before trying again.';}finally{busy=false;lock();}};
+const send=button(privateKiosk?'Email as KioskX':'Email as AniDeeBee',()=>action('email'));const call=button('Call their phone',()=>action('call'));const sms=button('Text their phone',()=>action('sms'));actions.append(send,call,sms);center.append(actions,el('p','sd-muted sd-action-help','Email sends the reply above. Call rings their phone from the office Google Voice after this browser is connected. Text sends the reply to a US phone. A number in India is blocked.'),feedback);
+function lock(){for(const c of controls)c.disabled=blocked||busy;send.disabled=blocked||busy||tab==='Private note'||!data.mailEnabled;call.disabled=blocked||busy||tab==='Private note';sms.disabled=blocked||busy||tab==='Private note'||!data.smsEnabled;}lock();if(blocked)feedback.textContent='This queue is unavailable. Try refreshing.';
+const side=el('aside','sd-right');side.append(fields('CONTACT',[['Email',privateKiosk?'Hidden':r.email||'No email'],['Phone',privateKiosk?'Hidden':r.phone||'No phone'],['Queue',names[r.queue]],['Received',r.when?new Date(r.when).toLocaleString():'Not recorded']],'sd-contact'));const ticket=el('section','sd-card sd-ticket');ticket.append(el('h3','','Ticket'));if(r.ticket&&typeof r.ticket==='object'){ticket.append(fields('',Object.entries(r.ticket).filter(([k,v])=>['title','state','priority','group'].includes(k)&&typeof v==='string').map(([k,v])=>[k,safe(v)])));}else ticket.append(el('p','','No ticket yet.'));side.append(ticket);host.append(center,side);
+}
+const css=el('style');css.textContent=`
+body .hired-desk > :not(#support-desk){display:none!important} body .hired-desk{display:block!important;background:#f4f0e7!important} #support-desk{position:fixed;inset:0;z-index:1000;display:grid;grid-template-columns:200px minmax(0,1fr);color:#1e3d3a;background:#f4f0e7;font:13px/1.45 Inter,Arial,sans-serif;text-align:left}#support-desk *{box-sizing:border-box}#support-desk button,#support-desk input,#support-desk textarea{font:inherit;color:inherit}#support-desk button{cursor:pointer}#support-desk button:disabled{opacity:.5;cursor:default}#support-desk h1,#support-desk h2,#support-desk h3,#support-desk p{margin:0}#support-desk h1{font-size:23px;line-height:32px;margin-bottom:10px}#support-desk h3{font-size:11px;letter-spacing:1px;color:#5d706e;margin-bottom:8px}#support-desk .sd-rail{background:#f8f3e9;border-right:1px solid #e2d6c0;padding:22px 16px;overflow:auto}#support-desk .sd-rail h2{font-size:23px;letter-spacing:-.7px}#support-desk .sd-brand{font-size:10px;color:#af7100;letter-spacing:1.5px;font-weight:700}#support-desk nav{margin-top:25px;display:grid;gap:4px}#support-desk nav button{display:flex;justify-content:space-between;align-items:center;border:0;background:transparent;border-radius:11px;padding:9px 12px;text-align:left;font-size:14px}#support-desk nav button[aria-pressed=true]{background:#ebe0ca;font-weight:700}#support-desk nav button span{font-size:12px;color:#627371}#support-desk .sd-list{padding:15px 16px;overflow:auto;min-width:0}#support-desk .sd-card,#support-desk .sd-today{background:white;border:1px solid #e2d6c0;border-radius:15px;padding:16px}#support-desk .sd-today{border-radius:12px;padding:11px 12px;margin-bottom:10px}#support-desk summary{cursor:pointer;font-weight:700;font-size:13px}#support-desk .sd-today p{margin-top:10px;font-size:12px}#support-desk .sd-today p:before{content:'•';margin-right:8px}#support-desk .sd-row{display:flex;align-items:center;gap:12px;width:100%;background:white;border:1px solid #e2d6c0;border-radius:15px;padding:12px;margin-bottom:10px;text-align:left;min-height:64px}#support-desk .sd-row[aria-pressed=true]{border-color:#1e3d3a}#support-desk .sd-avatar{width:36px;height:36px;flex:0 0 36px;border-radius:11px;display:grid;place-items:center;background:#ebe0ca;font-weight:700;font-size:14px}#support-desk .sd-row[aria-pressed=true] .sd-avatar{background:#1e3d3a;color:white}#support-desk .sd-row-copy{flex:1;min-width:0}#support-desk .sd-row-copy strong{font-size:14px;display:inline-block;max-width:100%;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;vertical-align:bottom}#support-desk small{font-size:10px;color:#ad7100;letter-spacing:.7px;margin-left:7px;text-transform:uppercase;font-weight:700}#support-desk .sd-preview{display:block;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-size:12px;color:#607471}#support-desk .sd-row-end{text-align:right;flex-shrink:0;display:grid;justify-items:end;gap:3px}#support-desk time{font-size:11px;color:#5b706d}#support-desk select.sd-chip{border:0;font-family:inherit;color:inherit;cursor:pointer}#support-desk .sd-chip{background:#ebe0ca;border-radius:20px;font-size:11px;line-height:21px;padding:0 10px;white-space:nowrap;display:inline-block}#support-desk .sd-new{background:#dce9f7;color:#286194}#support-desk .sd-call-next{background:#f8eac9;color:#af7300}#support-desk .sd-waiting{background:#ecebe7;color:#596b68}#support-desk .sd-done{background:#dcefe2;color:#208449}#support-desk .sd-legend{padding:14px;margin-top:10px;border-radius:12px}#support-desk .sd-legend p{display:flex;align-items:center;gap:10px;margin-top:7px;font-size:12px}#support-desk .sd-muted{color:#627673;font-size:12px}#support-desk.sd-open{grid-template-columns:200px 360px minmax(360px,1fr) 340px}#support-desk .sd-open .sd-list{border-right:1px solid #e2d6c0}#support-desk .sd-center{padding:24px 28px;overflow:auto;min-width:0;border-left:1px solid #e2d6c0;border-right:1px solid #e2d6c0}#support-desk .sd-heading{display:flex;align-items:center;gap:10px;margin-bottom:16px;flex-wrap:wrap}#support-desk .sd-heading h2{font-size:28px;letter-spacing:-.8px;line-height:40px}#support-desk dl{display:grid;grid-template-columns:150px minmax(0,1fr);gap:6px 12px;margin:0}#support-desk dt{color:#5c706d}#support-desk dd{margin:0;font-weight:600;overflow-wrap:anywhere;color:#1e3d3a;background:transparent}#support-desk .sd-section-title{margin:18px 0 16px}#support-desk .sd-message{padding:14px;margin-bottom:10px;border-radius:14px}#support-desk .sd-message header{display:flex;justify-content:space-between;margin-bottom:4px;font-size:12px}#support-desk .sd-message p{white-space:pre-wrap;overflow-wrap:anywhere}#support-desk .sd-outgoing{background:#e6f0eb;border-color:#e6f0eb}#support-desk .sd-note{background:#fbf2d8;border:1px dashed #ba7a00}#support-desk .sd-note strong{color:#ad7100}#support-desk .sd-composer{margin-top:18px}#support-desk .sd-tabs{display:flex;background:#f8f3e9;padding:4px;border-radius:12px;gap:3px;margin-bottom:12px}#support-desk .sd-tabs button{border:1px solid transparent;background:transparent;border-radius:8px;padding:6px 14px;font-size:12px}#support-desk .sd-tabs button[aria-selected=true]{background:white;border-color:#e2d6c0;font-weight:700}#support-desk textarea{width:100%;min-height:80px;resize:vertical;background:#f8f3e9;border:1px solid #e2d6c0;border-radius:11px;padding:12px}#support-desk .sd-reminder{display:flex;align-items:center;gap:8px;margin:12px 0 7px;flex-wrap:wrap}#support-desk .sd-reminder label{display:flex;gap:8px;align-items:center;font-size:12px}#support-desk input{background:white;border:1px solid #e2d6c0;border-radius:10px;width:86px;padding:8px}#support-desk .sd-composer>button,#support-desk .sd-reminder button{background:#ebe0ca;border:0;border-radius:10px;padding:8px 12px;font-size:12px;font-weight:600}#support-desk .sd-instruction{margin:18px 0;font-weight:600}#support-desk .sd-actions{display:flex;gap:10px}#support-desk .sd-actions button{flex:1;background:white;border:1px solid #1e3d3a;border-radius:12px;padding:11px 8px;font-size:12px;font-weight:600;white-space:nowrap}#support-desk .sd-actions button:first-child{background:#1e3d3a;color:white}#support-desk .sd-action-help{margin-top:18px;line-height:1.5}#support-desk .sd-feedback{margin-top:10px}#support-desk .sd-right{padding:17px 16px;overflow:auto}#support-desk .sd-right .sd-card{margin-bottom:14px}#support-desk .sd-right dl{grid-template-columns:150px minmax(0,1fr)}#support-desk .sd-ticket h3{text-transform:uppercase}#support-desk [hidden]{display:none!important}
+@media(max-width:1200px){#support-desk.sd-open{grid-template-columns:180px 280px minmax(330px,1fr)}#support-desk .sd-right{grid-column:3}#support-desk .sd-center{grid-row:1 / span 2}#support-desk .sd-right{display:none}#support-desk .sd-center{padding:20px} }
+@media(max-width:700px){#support-desk,#support-desk.sd-open{position:absolute;min-height:100vh;height:auto;grid-template-columns:1fr;overflow:auto}#support-desk .sd-rail{padding:12px}#support-desk nav{display:flex;flex-wrap:wrap;margin-top:10px}#support-desk .sd-list,#support-desk .sd-center,#support-desk .sd-right{grid-column:1;grid-row:auto;overflow:visible;display:block}#support-desk .sd-center{padding:16px}#support-desk dl{grid-template-columns:120px minmax(0,1fr)}#support-desk .sd-actions{flex-wrap:wrap}}
+`;document.head.append(css);
+window.kxQueueCounts=null;window.kxOpenQueue=k=>{queue=names[k]?k:'inbox';open='';render();};
+function start(){if(!document.documentElement)return;const desk=document.querySelector('main.hired-desk');if(!desk||host)return;host=el('div');host.id='support-desk';desk.append(host);render();api('queues').then(d=>{data=d;window.kxQueueCounts=Object.fromEntries(Object.keys(names).map(k=>[k,rows().filter(r=>r.queue===k).length]));render();}).catch(()=>{data={unavailable:true};window.kxQueueCounts={};render();});}
+new MutationObserver(start).observe(document.documentElement,{childList:true,subtree:true});start();
 })();
