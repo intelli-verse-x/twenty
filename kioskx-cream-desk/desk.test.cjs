@@ -82,6 +82,20 @@ test('Turo shows four exact names in order, no website link or price field; note
 test('Call without session reveals existing Google Voice box',async()=>{
  const m=await mount(await api.queueBoard());try{const original=m.d.querySelector('#kioskx-voice-connect'),e=await open(m,'cleaning');findButton(e,'Call').click();await pause();assert.ok(e.contains(original));assert.ok(e.textContent.includes('Connect Google Voice'));await open(m,'');assert.ok(m.d.querySelector('.hired-content:not(.kx-queue-panel)').contains(original));}finally{m.close();}
 });
+test('Inbox shows the IntelliVerse inbox inside the desk',async()=>{
+ const m=await mount(await api.queueBoard());try{
+  await open(m,'inbox');
+  const frame=m.d.querySelector('.kx-inbox-panel iframe');
+  assert.equal(frame.getAttribute('src'),'https://inbox.intelli-verse-x.ai/');
+  assert.equal(frame.title,'Inbox');
+  assert.equal(m.d.querySelector('.hired-content:not(.kx-inbox-panel)').hidden,true);
+  assert.equal(m.d.querySelector('[data-kx-inbox]').getAttribute('aria-pressed'),'true');
+  assert.equal(m.d.querySelector('.hired-toolbar h1').textContent,'Inbox');
+  await open(m,'');
+  assert.equal(m.d.querySelector('.kx-inbox-panel').hidden,true);
+  assert.equal(m.d.querySelector('.hired-content:not(.kx-inbox-panel)').hidden,false);
+ }finally{m.close();}
+});
 test('only open queue is selected and queue rows never use hired-nav; original list retained',async()=>{
  const m=await mount(await api.queueBoard());try{const original=m.d.querySelector('.hired-content');await open(m,'jobs');assert.equal(m.d.querySelectorAll('nav[aria-label="Queues"] .hired-nav').length,0);assert.equal(m.d.querySelectorAll('nav[aria-label="Queues"] .hired-potential-filter').length,4);assert.equal(m.d.querySelectorAll('nav button[aria-pressed="true"]').length,1);await open(m,'');assert.equal(m.d.querySelector('.hired-content'),original);assert.equal(original.hidden,false);}finally{m.close();}
 });

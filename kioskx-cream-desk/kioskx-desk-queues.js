@@ -35,6 +35,8 @@
     body .hired-workspace { height: 100vh; min-height: 0; overflow: hidden; }
     body .hired-content { min-height: 0; overflow: hidden; }
     body .hired-list, body .hired-detail { min-height: 0; overflow: auto; }
+    body .kx-inbox-panel { flex: 1; min-height: 0; height: calc(100vh - 72px); display: flex; }
+    body .kx-inbox-panel iframe { flex: 1; width: 100%; height: 100%; border: 0; background: #fff; }
     body.kx-auth, body.kx-auth #root,
     body.kx-auth [class*="backdrop"], body.kx-auth [class*="modal"],
     body.kx-auth [class*="content"] { background: #f4f1ea !important; box-shadow: none !important; }
@@ -417,6 +419,43 @@
       }
     }
     const workspace = desk.querySelector('.hired-workspace');
+    ensureInbox(desk);
+    const inboxButton = desk.querySelector('[data-kx-inbox]');
+    if (inboxButton) {
+      inboxButton.className = 'hired-potential-filter';
+      inboxButton.setAttribute('aria-pressed', selected === 'inbox' ? 'true' : 'false');
+    }
+    const inboxPanel = workspace?.querySelector('.kx-inbox-panel');
+    if (inboxPanel) inboxPanel.hidden = selected !== 'inbox';
+    const today = workspace?.querySelector('.kx-today');
+    if (today) today.hidden = selected === 'inbox';
+    if (selected === 'inbox') {
+      for (const notice of workspace?.querySelectorAll(':scope > .hired-notice') || []) {
+        notice.hidden = true; notice.style.display = 'none';
+      }
+      const content = workspace?.querySelector('.hired-content:not(.kx-queue-panel):not(.kx-inbox-panel)');
+      const title = workspace?.querySelector('.hired-toolbar h1');
+      const search = workspace?.querySelector('.hired-toolbar input');
+      const summary = workspace?.querySelector('.hired-toolbar .hired-count');
+      if (summary) summary.hidden = true;
+      if (content) { content.hidden = true; content.style.display = 'none'; }
+      if (search) search.hidden = true;
+      workspace?.querySelector('.kx-queue-panel')?.remove();
+      if (title && title.textContent !== 'Inbox') { title.dataset.kxQueue = 'inbox'; title.textContent = 'Inbox'; }
+      let frameHost = workspace?.querySelector('.kx-inbox-panel');
+      if (!frameHost && workspace) {
+        frameHost = document.createElement('div');
+        frameHost.className = 'hired-content kx-inbox-panel';
+        const frame = document.createElement('iframe');
+        frame.title = 'Inbox';
+        frame.src = 'https://inbox.intelli-verse-x.ai/';
+        frameHost.append(frame);
+        workspace.appendChild(frameHost);
+      }
+      if (frameHost) frameHost.hidden = false;
+      applying = false;
+      return;
+    }
     for (const notice of workspace?.querySelectorAll(':scope > .hired-notice') || []) {
       notice.hidden = Boolean(selected); notice.style.display = selected ? 'none' : '';
     }
@@ -454,11 +493,31 @@
     applying = false;
   };
 
+  const ensureInbox = (desk) => {
+    if (desk.querySelector('[data-kx-inbox]')) return;
+    const nav = document.createElement('nav');
+    nav.setAttribute('aria-label', 'Inbox');
+    const button = document.createElement('button');
+    button.type = 'button';
+    button.dataset.kxInbox = 'open';
+    button.className = 'hired-potential-filter';
+    button.textContent = 'Inbox';
+    button.addEventListener('click', (event) => {
+      event.preventDefault();
+      event.stopPropagation();
+      window.kxOpenQueue('inbox');
+    });
+    nav.append(button);
+    const views = desk.querySelector('nav[aria-label="Views"]');
+    if (views) views.before(nav);
+  };
+
   window.kxOpenQueue = (name) => {
-    if (NAMES[name] && !selected) {
+    const known = name === 'inbox' || Boolean(NAMES[name]);
+    if (known && !selected) {
       savedNavigation = [...document.querySelectorAll('nav[aria-label="Views"] button, nav[aria-label="Lead potential filters"] button')].map(button => [button, button.getAttribute('aria-pressed') || 'false']);
-    } else if (!NAMES[name]) restoreNavigation();
-    selected = NAMES[name] ? name : '';
+    } else if (!known) restoreNavigation();
+    selected = known ? name : '';
     openId = '';
     window.kxQueue = selected;
     paint();
