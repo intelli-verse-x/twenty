@@ -2,7 +2,7 @@ const {test}=require('node:test');
 const assert=require('node:assert/strict');
 const fs=require('node:fs'),vm=require('node:vm');
 const {JSDOM}=require('/tmp/sales-desk-test-tools/node_modules/jsdom');
-const reach=require('./reach');
+const reach=require(process.env.BASELINE_QUEUE ? './baseline/reach' : './reach');
 const root=process.env.BASELINE_QUEUE ? __dirname+'/baseline' : __dirname;
 const records=[
  {id:'11111111-1111-4111-8111-111111111111',name:'Customer',kind:'cleaning_request',requestedService:'Home cleaning',email:'fixture@example.invalid',phone:'2025550100',requestDetailsMarkdown:JSON.stringify({bedrooms:3,bathrooms:2,size:'Large',zip:'00000',frequency:'Weekly',date:'2026-12-01',laundryNotes:'Fold towels',consent:'private boilerplate',message:'Please clean upstairs.'})},
@@ -179,3 +179,56 @@ test('native Kiosk cards keep existing notes and masked list, get reply actions'
 });
 
 test('explicit India country blocks national-format number too',async()=>{const r=rig();r.deps.record.country='IN';r.deps.record.phone='2025550100';assert.equal((await r.run('sms')).message,'Text to India is blocked.');assert.equal(r.sent.sms,0);});
+
+function mailRig(fail) {
+ const messages=[];let closed=0;
+ const env={KIOSKX_HIRED_EMAIL_FROM:'support@kiosk-x.ai'};
+ const s={module:{exports:{}},process:{env},Buffer,AbortSignal,require:n=>n==='nodemailer'?{createTransport:()=>({sendMail:async m=>{messages.push(m);if(fail)await fail(messages.length);return {accepted:[true]};},close(){closed++;}})}:require(n)};
+ vm.runInNewContext(fs.readFileSync(root+'/reach.js','utf8'),s);
+ return {messages,transport:async()=>(await s.module.exports.transports({})).email,closed:()=>closed};
+}
+test('AniDeeBee queues use branded From and preserve queue subject through production adapter',async()=>{
+ for(const queue of ['cleaning','cars','jobs','kiosk']){
+  const m=mailRig(),r=rig({email:await m.transport()});r.deps.record.queue=queue;
+  const result=await r.run('email');assert.equal(result.status,'sent');
+  assert.ok(m.messages[0].from===(queue==='kiosk'?'support@kiosk-x.ai':'AniDeeBee <support@anideebee.com>'),'correct sender identity');
+  assert.equal(m.messages[0].subject,({cleaning:'Cleaning request',cars:'Cars request',jobs:'Jobs request',kiosk:'Kiosk inquiry'})[queue]+' — Customer');
+ }
+});
+test('definite sender refusal falls back once and persists fallback sentence across repeated reply',async()=>{
+ const m=mailRig(n=>{if(n===1)throw {responseCode:550,command:'MAIL FROM',response:'sender refused'};});
+ const r=rig({email:await m.transport()});const result=await r.run('email');
+ assert.ok(result.message==='Sent as support@kiosk-x.ai. AniDeeBee mail was refused.','fallback sentence');
+ assert.equal(m.messages.length,2);assert.ok(m.messages[1].from==='support@kiosk-x.ai','fallback identity');
+ await r.run('email');assert.equal(m.messages.length,2);assert.equal(result.thread[0].message,result.message);
+});
+test('recipient rejection, auth rejection and uncertain delivery never fallback',async()=>{
+ for(const error of [{responseCode:550,command:'RCPT TO'},{responseCode:535,command:'AUTH'},{code:'ETIMEDOUT'},{responseCode:451,command:'MAIL FROM'}]){
+  const m=mailRig(()=>{throw error;});const r=rig({email:await m.transport()});await r.run('email');await r.run('email');assert.equal(m.messages.length,1);
+ }
+});
+test('rejected fallback remains terminal and does not retry refused sender',async()=>{
+ const m=mailRig(()=>{throw {responseCode:550,command:'MAIL FROM'};});const r=rig({email:await m.transport()});assert.equal((await r.run('email')).status,'refused');await r.run('email');assert.equal(m.messages.length,2);
+});
+test('cleaning reminder fills dated sentence or empty-time instruction and never calls mail',async()=>{
+ let mails=0;const m=await mount(await api.queueBoard(),()=>{mails++;});
+ try{const e=await open(m,'cleaning'),reminder=findButton(e,'Appointment reminder');assert.ok(reminder,'reminder exists');
+ const time=e.querySelector('[aria-label="Appointment time"]');time.value='10:30 AM';reminder.click();await pause();
+ assert.equal(e.querySelector('textarea').value,'You have an appointment tomorrow at 10:30 AM. Date on the request: 2026-12-01.');
+ time.value='';reminder.click();assert.equal(e.querySelector('textarea').value,'Add the appointment time, then use Appointment reminder.');
+ assert.equal(mails,0);assert.ok(!m.calls.some(u=>/queue-send|queue-work|\/call$/.test(u)));
+ }finally{m.close();}
+});
+test('reminder without date has no invented date; Cars Jobs and Turo have no reminder',async()=>{
+ const payload=await api.queueBoard();payload.queues.cleaning.rows[0].appointmentDate='';const m=await mount(payload);
+ try{const e=await open(m,'cleaning');const b=findButton(e,'Appointment reminder');assert.ok(b);e.querySelector('[aria-label="Appointment time"]').value='2 PM';b.click();assert.equal(e.querySelector('textarea').value,'You have an appointment tomorrow at 2 PM.');for(const q of ['cars','jobs','turo'])assert.equal(findButton(await open(m,q),'Appointment reminder'),undefined);}finally{m.close();}
+});
+test('Today reads two stored email results and one call, sanitizes name, excludes yesterday and failures',async()=>{
+ const r=rig();await r.run('email');await r.deps.repo.claim('fixture','second','email','second');await r.deps.repo.finish('second',{kind:'email',status:'sent'});await r.run('call',{sessionId:'fixture'});
+ const payload=await api.queueBoard();payload.queues.cleaning.rows[0].label='Customer contact@example.invalid +1 (202) 555-0100';
+ payload.queues.cleaning.rows[0].thread=[...await r.deps.repo.thread(),{kind:'email',status:'sent',time:new Date(Date.now()-86400000).toISOString()},{kind:'sms',status:'refused',time:new Date().toISOString()}];
+ const m=await mount(payload);try{const box=m.d.querySelector('.kx-today');assert.ok(box);assert.ok(box.textContent.includes('2 emails'));assert.ok(box.textContent.includes('1 call'));assert.ok(!box.textContent.includes('@'));assert.ok(!/\d[\d ().-]{6,}\d/.test(box.textContent));assert.ok(box.textContent.includes('Cleaning — Customer'));assert.ok(box.textContent.includes('Email sent'));assert.ok(box.textContent.includes('Call queued'));box.open=true;assert.equal(box.open,true);}finally{m.close();}
+});
+test('Today zero and unavailable states are honest',async()=>{
+ for(const [payload,copy] of [[{queues:{}},'Today: nothing sent.'],[{queues:{},workUnavailable:true},'Today: activity unavailable.']]){const m=await mount(payload);try{assert.equal(m.d.querySelector('.kx-today summary')?.textContent,copy);}finally{m.close();}}
+});

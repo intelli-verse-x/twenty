@@ -48,7 +48,7 @@ async function act({id,kind,sessionId='',requestId=''}, {repo,record,email,sms,v
  if(!await repo.claim(id,key,kind,body))return result('This reply was already submitted.','duplicate');
  let status='sent',copy=message[kind];
  try {
-  if(kind==='email'){const r=await email({to:record.email,subject:`${labels[record.queue]} — ${record.label}`,text:body});if(!r.accepted) {status='refused';copy=failure.email;}}
+  if(kind==='email'){const r=await email({queue:record.queue,to:record.email,subject:`${labels[record.queue]} — ${record.label}`,text:body});if(!r.accepted) {status='refused';copy=failure.email;} else if(r.message) copy=r.message;}
   if(kind==='sms'){const r=await sms({to:dest.number,text:body});if(!r.accepted){status='refused';copy=failure.sms;}}
   if(kind==='call'){const r=await voice({destination:dest?.number,sessionId,key,leadId:id,queue:record.queue});status=r.status;copy=status==='queued'?message.call:status==='connect'?'Connect Google Voice to place this call.':failure.call;}
  } catch(e) {status=e.definite?'refused':'unknown';copy=e.definite?failure[kind]:(kind==='email'?'Email outcome is unconfirmed. Do not resend.':kind==='sms'?'Text outcome is unconfirmed. Do not resend.':'Call outcome is unconfirmed. Do not retry.');}
@@ -74,9 +74,24 @@ async function reconcile(repo,id,desk) {
 }
 async function transports(desk) {
  return {
-  email:async ({to,subject,text})=>{
+  email:async ({queue,to,subject,text})=>{
    const mail=require('nodemailer').createTransport({host:process.env.EMAIL_SMTP_HOST,port:Number(process.env.EMAIL_SMTP_PORT||587),secure:false,requireTLS:true,auth:{user:process.env.EMAIL_SMTP_USER,pass:process.env.EMAIL_SMTP_PASSWORD},connectionTimeout:10000,socketTimeout:20000,logger:false,debug:false});
-   try {const r=await mail.sendMail({from:process.env.KIOSKX_HIRED_EMAIL_FROM,to,subject,text,disableFileAccess:true,disableUrlAccess:true});return {accepted:r.accepted?.length===1};} catch(e){throw {definite:!!e.responseCode||['EAUTH','EENVELOPE','ECONNECTION'].includes(e.code)};}finally{mail.close();}
+   const branded=['cleaning','cars','jobs'].includes(queue);
+   const fallback=process.env.KIOSKX_HIRED_EMAIL_FROM;
+   const from=branded?'AniDeeBee <support@anideebee.com>':fallback;
+   const send=identity=>mail.sendMail({from:identity,to,subject,text,disableFileAccess:true,disableUrlAccess:true});
+   try {
+    let r,usedFallback=false;
+    try {r=await send(from);} catch(e) {
+     // Only a definitive sender rejection permits a second attempt. A timeout,
+     // authentication failure, recipient rejection or ambiguous DATA never does.
+     const refusedSender=Number(e.responseCode)>=500 && Number(e.responseCode)<600 &&
+      (/^MAIL FROM\b/i.test(e.command||'') || (/^DATA$/i.test(e.command||'') && /(?:sender|from address|send as).*(?:reject|refus|not (?:allowed|authorized|verified))|(?:reject|refus|not (?:allowed|authorized|verified)).*(?:sender|from address|send as)/i.test(e.response||'')));
+     if(!branded||!refusedSender)throw e;
+     usedFallback=true;r=await send(fallback);
+    }
+    return {accepted:r.accepted?.length===1,...(usedFallback?{message:'Sent as support@kiosk-x.ai. AniDeeBee mail was refused.'}:{})};
+   } catch(e){throw {definite:!!e.responseCode||['EAUTH','EENVELOPE','ECONNECTION'].includes(e.code)};}finally{mail.close();}
   },
   sms:async ({to,text})=>{const r=await fetch('https://api.telnyx.com/v2/messages',{method:'POST',headers:{Authorization:'Bearer '+process.env.TELNYX_TOKEN,'Content-Type':'application/json'},body:JSON.stringify({from:sender(),to,text}),signal:AbortSignal.timeout(20000)});if(!r.ok){if(r.status<500) return {accepted:false};throw Error();}const d=await r.json();return {accepted:!!d.data?.id};},
   voice:async ({destination,sessionId,key,leadId,queue})=>desk.system(async()=>{
