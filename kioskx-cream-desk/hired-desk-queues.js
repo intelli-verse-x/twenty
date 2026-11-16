@@ -48,6 +48,7 @@ function row(record, queue) {
         summary: service || (queue === 'cars' ? val('vehicle') : '') || 'Inquiry', description,
         country:text(record.country)||val('country')||val('phoneCountry')||val('countryCode'),
         email: text(record.email) || val('email'), phone: text(record.phone) || val('phone'),
+        appointmentDate: queue === 'cleaning' ? val('date') : '',
         message, notice: queue === 'cars' ? 'This request does not reserve a car.' : '',
         status: 'New', draft: '', note: '' };
 }

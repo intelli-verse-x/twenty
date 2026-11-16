@@ -110,6 +110,29 @@
     }
   };
 
+  const safeActivityName = value => String(value || 'Inquiry')
+    .replace(/[^\s<>()[\],;:]*@[^\s<>()[\],;:]*/g, '[contact hidden]')
+    .replace(/\+?\d[\d ().-]{5,}\d/g, '[contact hidden]');
+  const paintToday = () => {
+    const workspace=document.querySelector('.hired-workspace');if(!workspace)return;
+    let box=workspace.querySelector('.kx-today');
+    if(!box){box=document.createElement('details');box.className='kx-today';box.append(document.createElement('summary'),document.createElement('div'));workspace.querySelector('.hired-toolbar')?.after(box);}
+    const now=new Date(), entries=[];
+    for(const [queue,q] of Object.entries(data?.queues||{}))for(const row of q.rows||[])for(const item of row.thread||[]){
+      const date=new Date(item.time);
+      if(date.toDateString()!==now.toDateString())continue;
+      if(!(['email','sms'].includes(item.kind)&&item.status==='sent') && !(item.kind==='call'&&['sent','queued','completed'].includes(item.status)))continue;
+      entries.push({queue,name:safeActivityName(row.label),kind:item.kind,status:item.status,time:date});
+    }
+    entries.sort((a,b)=>b.time-a.time);
+    const count=kind=>entries.filter(e=>e.kind===kind).length;
+    const summary=!data||data.unavailable||data.workUnavailable?'Today: activity unavailable.':!entries.length?'Today: nothing sent.':`Today: ${count('email')} emails, ${count('call')} calls, ${count('sms')} texts.`;
+    const lines=entries.map(e=>`${({cleaning:'Cleaning',cars:'Cars',jobs:'Jobs',kiosk:'Kiosk'})[e.queue]||'Inquiry'} — ${e.name} — ${e.kind==='email'?'Email sent':e.kind==='sms'?'Text sent':e.status==='queued'?'Call queued':'Call completed'} — ${e.time.toLocaleTimeString([], {hour:'2-digit',minute:'2-digit'})}`);
+    const stamp=JSON.stringify([summary,lines]);if(box.dataset.stamp===stamp)return;box.dataset.stamp=stamp;
+    box.querySelector('summary').textContent=summary;const list=box.querySelector('div');list.replaceChildren();
+    for(const line of lines){const row=document.createElement('p');row.textContent=line;list.append(row);}
+  };
+
   const renderPanel = (panel) => {
     const queue = data?.queues?.[selected] || (selected === 'turo' ? { rows: [
       ['turo:c300','Mercedes C300'], ['turo:tesla-2023','2023 Tesla Model Y'],
@@ -270,6 +293,18 @@
       field.disabled = workUnavailable;
       const saveButton = button(fleetNote ? 'Save note' : 'Save draft', () => save(fleetNote ? { note: field.value } : { draft: field.value }));
       savingButtons.push(saveButton);
+      if(selected==='cleaning') {
+        const reminderRow=document.createElement('div');
+        const time=document.createElement('input');time.type='text';time.placeholder='Appointment time';time.setAttribute('aria-label','Appointment time');time.maxLength=80;
+        time.style.cssText='font:inherit;color:inherit;background:transparent;border:1px solid #d9cbb5;border-radius:8px;padding:10px;max-width:100%;box-sizing:border-box';
+        const reminder=button('Appointment reminder',()=>{
+          const value=time.value.trim();
+          field.value=value?`You have an appointment tomorrow at ${value}.`+(current.appointmentDate?` Date on the request: ${current.appointmentDate}.`:''):'Add the appointment time, then use Appointment reminder.';
+          field.focus();
+        });
+        reminder.disabled=workUnavailable;time.disabled=workUnavailable;
+        reminderRow.append(reminder,time);controls.append(reminderRow);
+      }
       controls.append(label, field, saveButton, feedback);
       savingButtons.forEach(b => b.disabled = workUnavailable);
       if (fleetNote) {
@@ -306,7 +341,7 @@
           try{
             if(kind!=='call'){await save({draft:field.value});if(current.draft!==field.value)throw Error();}
             const response=await fetch('/kioskx-hired-desk/'+(kind==='call'?'call':'queue-send'),{method:'POST',headers:{Authorization:'Bearer '+token(),'Content-Type':'application/json'},body:JSON.stringify(kind==='call'?{leadId:current.id,requestId:crypto.randomUUID()}:{id:current.id,kind})});
-            if(!response.ok)throw Error();const result=await response.json();feedback.textContent=result.message;current.thread=result.thread||current.thread;paintThread();
+            if(!response.ok)throw Error();const result=await response.json();feedback.textContent=result.message;current.thread=result.thread||current.thread;paintThread();paintToday();
             if(result.status==='connect')openVoice();
           }catch{feedback.textContent=kind==='email'?'Email outcome is unconfirmed. Refresh before trying again.':kind==='sms'?'Text outcome is unconfirmed. Refresh before trying again.':'Call outcome is unconfirmed. Refresh before trying again.';}
           finally{busy=false;send.disabled=workUnavailable||!data.mailEnabled;call.disabled=workUnavailable;sms.disabled=workUnavailable||!data.smsEnabled;}
@@ -360,6 +395,7 @@
     if (!desk) return;
     applying = true;
     paintCounts();
+    paintToday();
     for (const name of Object.keys(NAMES)) {
       const match = [...desk.querySelectorAll('nav[aria-label="Queues"] button')].find(
         (item) => item.textContent.trim().startsWith(NAMES[name]),
