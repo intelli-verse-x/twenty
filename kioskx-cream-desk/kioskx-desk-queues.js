@@ -172,7 +172,19 @@ function renderCompanies(page){
 }
 function crewOverview(page){
  const c=card('WORKER HOURS AND PAYOUT REQUESTS');page.append(c);
- const load=async()=>{try{const d=await api('crew-jobs');if(!c.isConnected)return;if(d.unavailable)throw Error();c.replaceChildren(el('h3','','WORKER HOURS AND PAYOUT REQUESTS'),button('Refresh hours',load));if(!d.jobs.length)c.append(el('p','','No jobs assigned.'));for(const j of d.jobs){const h=j.punch_in?Math.max(0,((j.punch_out||Date.now()/1000)-j.punch_in)/3600):0;c.append(el('p','',`${j.role||'Worker'} •••${j.phone.slice(-4)} · ${j.name} · ${j.address}, ${j.city||''} · ${j.punch_out?'Punched out':j.punch_in?'On the clock':j.travel==='on_the_way'?'On the way':'Not started'} · ${h.toFixed(2)} hours${j.payout_requested?' · Payout requested':''}`));}c.append(el('p','','Payroll is not connected. No money moves.'));}catch{if(!c.isConnected)return;c.replaceChildren(el('p','','Worker hours are unavailable.'),button('Refresh hours',load));}};load();
+ const load=async()=>{try{
+  const d=await api('crew-jobs');if(!c.isConnected)return;if(d.unavailable)throw Error();
+  c.replaceChildren(el('h3','','WORKER HOURS AND PAYOUT REQUESTS'),button('Refresh hours',load));
+  if(!d.jobs.length)c.append(el('p','','No jobs assigned.'));
+  const workers=new Map();for(const j of d.jobs){if(!workers.has(j.phone))workers.set(j.phone,[]);workers.get(j.phone).push(j);}
+  const hours=j=>j.punch_in?Math.max(0,((j.punch_out||Date.now()/1000)-j.punch_in)/3600):0;
+  for(const [phone,jobs]of workers){
+   const row=el('section','sd-crew-worker');row.append(el('h4','',`${jobs[0].role||'Worker'} •••${phone.slice(-4)} · ${jobs.reduce((n,j)=>n+hours(j),0).toFixed(2)} hours`));
+   for(const j of jobs)row.append(el('p','',`${j.name} · ${j.address}, ${j.city||''} · ${j.punch_out?'Punched out':j.punch_in?'On the clock':j.arrived?'At the address':j.travel==='on_the_way'?'On the way':'Not started'} · ${hours(j).toFixed(2)} hours${j.payout_requested?' · Payout requested':''}`));
+   c.append(row);
+  }
+  c.append(el('p','','Payroll is not connected. No money moves.'));
+ }catch{if(!c.isConnected)return;c.replaceChildren(el('p','','Worker hours are unavailable.'),button('Refresh hours',load));}};load();
 }
 function crewCard(r){
  const c=card('ASSIGN A HIRED WORKER','Assigning does not send a message. The worker sees this job after mobile verification.');
