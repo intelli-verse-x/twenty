@@ -1,4 +1,8 @@
+const applications = require('./desk-applications');
+const studio = require('./desk-voice');
+const crewJobs = require('./crew-jobs');
 const reach = require('./reach');
+const companyDesk = require('./desk-company');
 const { BadRequestException } = require('@nestjs/common');
 const { Client } = require('pg');
 const QUEUES = { cleaning: 'cleaning_request', cars: 'car_request', jobs: 'job_application' };
@@ -154,18 +158,18 @@ async function guardedSend(send) {
     return send();
 }
 const INBOX_LOGIN = {
-    'Kiosk X':[1,1],'ToBa Tech':[34,1],'QuizVerse':[1,1],'QuestX':[1,1],
-    'IntelliVerse X':[1,1],'ContentX Studio':[1,1],'Foundrly':[100,133],'AniDeeBee':[1,1]
+    'Kiosk X':[1,101],'ToBa Tech':[34,36],'QuizVerse':[1,2],'QuestX':[1,103],
+    'IntelliVerse X':[1,100],'ContentX Studio':[1,102],'AniDeeBee':[1,3]
 };
 async function inboxLogin(company, env = process.env, request = fetch) {
     const unavailable = () => ({message:'Inbox sign-in is not available.'});
     if (!Object.hasOwn(INBOX_LOGIN, company || '')) return unavailable();
-    const [account,user] = INBOX_LOGIN[company];
+    const [account,inbox] = INBOX_LOGIN[company];
     if (!env.CHATWOOT_API_URL || !env.CHATWOOT_PLATFORM_TOKEN) return unavailable();
     try {
         const base = new URL(env.CHATWOOT_API_URL);
         if (base.protocol !== 'https:') return unavailable();
-        const response = await request(new URL(`/platform/api/v1/users/${user}/login`, base), {
+        const response = await request(new URL('/platform/api/v1/users/1/login', base), {
             method:'GET', redirect:'error', headers:{api_access_token:env.CHATWOOT_PLATFORM_TOKEN},
             signal:AbortSignal.timeout(10000)
         });
@@ -174,10 +178,26 @@ async function inboxLogin(company, env = process.env, request = fetch) {
         const url = new URL(payload.url);
         if (url.origin !== base.origin || url.pathname !== '/app/login' || !url.searchParams.get('sso_auth_token')) return unavailable();
         url.searchParams.set('sso_account_id', String(account));
-        return {url:url.href};
+        url.searchParams.delete('sso_conversation_id');
+        return {url:url.href,inbox:`https://inbox.intelli-verse-x.ai/app/accounts/${account}/inbox/${inbox}`};
     } catch { return unavailable(); }
 }
 class QueueController {
+    async applications(request) { await this.authorize(request); return applications.read(request.query||{}); }
+    async applicationResume(request) { await this.authorize(request); if(request.query?.company!=='AniDeeBee'||!/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(request.query?.id||''))return request.res.status(404).end();try{const r=await applications.stored('/applications/'+request.query.id+'/resume');request.res.setHeader('Content-Type',r.headers.get('content-type'));request.res.setHeader('Content-Disposition',r.headers.get('content-disposition'));return request.res.send(Buffer.from(await r.arrayBuffer()));}catch{return request.res.status(404).end();} }
+
+    async voiceSession(request) { await this.authorize(request); return studio.begin(request); }
+    async voiceProxy(request) { const s=studio.session(request);if(!s)return request.res.status(403).send(studio.failure);request.studioAuthorization=request.headers.authorization;request.headers.authorization=s.authorization;await this.authorize(request);return studio.proxy(request,request.res,s); }
+
+    async crewJobs(request) { await this.authorize(request); return crewJobs.requestCrew(); }
+    async crewAssign(request,body) { await this.authorize(request); return crewJobs.assign(body,await queueBoard(this.desk)); }
+
+    async companyMail(request) { await this.authorize(request); return companyDesk.mailRead(request.query || {}); }
+    async companyReply(request, body) { await this.authorize(request); return companyDesk.mailReply(body); }
+    async companyEngagement(request) { await this.authorize(request); return companyDesk.engagementState(request.query?.company); }
+    async companySite(request, body) { await this.authorize(request); return companyDesk.readSite(body); }
+    async companySend(request, body) { await this.authorize(request); return companyDesk.engagementSend(body); }
+
     async inboxLogin(request) { await this.authorize(request); return inboxLogin(request.query?.company); }
     async queues(request) { await this.authorize(request); return queueBoard(this.desk); }
     async queueWork(request, body) { await this.authorize(request); return saveWork(body, this.desk); }
@@ -200,12 +220,13 @@ class QueueController {
 }
 exports.install = Controller => {
     const common = require('@nestjs/common');
-    for (const [name, route, verb] of [['inboxLogin','inbox-login','Get'],['queues','queues','Get'],['queueWork','queue-work','Post'],['queueSend','queue-send','Post'],['call','call','Post'],['voiceBridge','voice-bridge','Post']]) {
+    for (const [name, route, verb] of [['applications','applications','Get'],['applicationResume','application-resume','Get'],['voiceSession','voice-session','Get'],['voiceProxy','voice/*','All'],['crewJobs','crew-jobs','Get'],['crewAssign','crew-assign','Post'],['companyMail','company-mail','Get'],['companyReply','company-reply','Post'],['companyEngagement','company-engagement','Get'],['companySend','company-send','Post'],['companySite','company-site','Post'],['inboxLogin','inbox-login','Get'],['queues','queues','Get'],['queueWork','queue-work','Post'],['queueSend','queue-send','Post'],['call','call','Post'],['voiceBridge','voice-bridge','Post']]) {
         Object.defineProperty(Controller.prototype, name, Object.getOwnPropertyDescriptor(QueueController.prototype, name));
         const desc = Object.getOwnPropertyDescriptor(Controller.prototype, name);
         common[verb](route)(Controller.prototype, name, desc);
         common.Header('Cache-Control','no-store')(Controller.prototype, name, desc);
         common.Req()(Controller.prototype,name,0);
+        if(['voiceProxy','applicationResume'].includes(name))common.Res()(Controller.prototype,name,1);
         if (verb === 'Post') common.Body()(Controller.prototype,name,1);
     }
 };
