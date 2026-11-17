@@ -184,8 +184,8 @@ function renderCalendar(page){
  clearInterval(calendarPoll);
  const asked=company,live=()=>page.isConnected&&company===asked&&queue==='calendar';
  const wrap=el('div','sd-calendar'),status=el('p','sd-calendar-status','Loading calendar…');status.setAttribute('role','status');page.append(wrap);
- const style=el('style');style.textContent=`.sd-calendar{font-family:Arial,sans-serif;min-width:0}.sd-calendar-toolbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:20px 0}.sd-calendar-toolbar h2{margin:0 auto 0 0!important;font-family:inherit!important}.sd-calendar-scroll{overflow-x:auto}.sd-calendar-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));min-width:560px;border-top:1px solid #cbd5e1;border-left:1px solid #cbd5e1}.sd-calendar-weekday,.sd-calendar-day{padding:8px;border-right:1px solid #cbd5e1;border-bottom:1px solid #cbd5e1}.sd-calendar-weekday{background:#e8edf3;font-weight:600}.sd-calendar-day{min-height:112px;background:#fff;min-width:0}.sd-calendar-outside{background:#f1f5f9;color:#64748b}.sd-calendar-number{display:inline-grid;place-items:center;width:28px;height:28px;margin-bottom:6px}.sd-calendar-today .sd-calendar-number{border-radius:50%;background:#1f3a5f;color:white;font-weight:700}.sd-calendar-event{display:block;background:#e4edff;color:#173458;border-left:3px solid #42699c;border-radius:4px;padding:5px;margin:3px 0;font-size:12px;overflow-wrap:anywhere}.sd-calendar-event time{display:block;font-weight:700}.sd-calendar-status{color:#334155;line-height:1.5}.sd-calendar-toolbar button{min-height:40px}.sd-calendar-connect{margin-top:16px}`;page.append(style);
- let version=0,loading=false;
+ const style=el('style');style.textContent=`.sd-calendar{font-family:Arial,sans-serif;min-width:0}.sd-calendar-toolbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:20px 0}.sd-calendar-toolbar h2{margin:0 auto 0 0!important;font-family:inherit!important}.sd-calendar-scroll{overflow-x:auto}.sd-calendar-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));min-width:560px;border-top:1px solid #cbd5e1;border-left:1px solid #cbd5e1}.sd-calendar-weekday,.sd-calendar-day{padding:8px;border-right:1px solid #cbd5e1;border-bottom:1px solid #cbd5e1}.sd-calendar-weekday{background:#e8edf3;font-weight:600}.sd-calendar-day{min-height:112px;background:#fff;min-width:0}.sd-calendar-outside{background:#f1f5f9;color:#64748b}.sd-calendar-number{display:inline-grid;place-items:center;width:28px;height:28px;margin-bottom:6px}.sd-calendar-today .sd-calendar-number{border-radius:50%;background:#1f3a5f;color:white;font-weight:700}.sd-calendar-event{display:block;background:#e4edff;color:#173458;border-left:3px solid #42699c;border-radius:4px;padding:5px;margin:3px 0;font-size:12px;overflow-wrap:anywhere}.sd-calendar-event time{display:block;font-weight:700}.sd-calendar-status{color:#334155;line-height:1.5}.sd-calendar-toolbar button,.sd-calendar-form button{min-height:40px}.sd-calendar-form{display:flex;flex-wrap:wrap;gap:8px;align-items:end;margin:0 0 12px}.sd-calendar-form input{min-height:40px;border:1px solid #cbd5e1;border-radius:6px;padding:8px}.sd-calendar-connect{margin-top:16px}`;page.append(style);
+ let version=0,loading=false,editing=null,last=null;
  const key=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
  function grid(events){
   const scroll=el('div','sd-calendar-scroll'),g=el('div','sd-calendar-grid');g.setAttribute('aria-label','Month calendar');scroll.append(g);
@@ -196,22 +196,38 @@ function renderCalendar(page){
    for(const event of events){
     const start=event.allDay?event.start:key(new Date(event.start)),end=event.allDay?event.end:key(new Date(new Date(event.end).getTime()-1));
     if(!start||dayKey<start||(event.allDay?dayKey>=(end||start+'z'):dayKey>(end||start)))continue;
-    const chip=el('div','sd-calendar-event'),when=event.allDay?'All day':dayKey===start?new Date(event.start).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'}):'Continues';chip.append(el('time','',when),el('span','',event.title));cell.append(chip);
+    const chip=el('div','sd-calendar-event'),when=event.allDay?'All day':dayKey===start?new Date(event.start).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'}):'Continues';chip.append(el('time','',when),el('span','',event.title));if(event.id){const edit=button('Edit',()=>{editing=event;paint(last);});edit.setAttribute('aria-label','Edit '+event.title);chip.append(edit);}cell.append(chip);
    }g.append(cell);
   }return scroll;
  }
+ function eventForm(){
+  const form=el('form','sd-calendar-form'),title=el('input'),date=el('input'),start=el('input'),end=el('input'),feedback=el('p','sd-calendar-status','');
+  title.setAttribute('aria-label','Event title');title.maxLength=140;title.placeholder='Event title';title.value=editing?.title&&editing.title!=='Appointment'?editing.title:'';
+  date.type='date';date.setAttribute('aria-label','Event date');start.type='time';start.setAttribute('aria-label','Start time');end.type='time';end.setAttribute('aria-label','End time');
+  if(editing?.start&&!editing.allDay){const s=new Date(editing.start),e=new Date(editing.end),p=n=>String(n).padStart(2,'0');date.value=`${s.getFullYear()}-${p(s.getMonth()+1)}-${p(s.getDate())}`;start.value=`${p(s.getHours())}:${p(s.getMinutes())}`;end.value=`${p(e.getHours())}:${p(e.getMinutes())}`;}
+  const save=el('button','',editing?'Save event':'Add event');save.type='submit';form.append(title,date,start,end,save);
+  if(editing?.id)form.append(button('Delete event',()=>write({action:'delete',id:editing.id},feedback)));
+  form.onsubmit=e=>{e.preventDefault();const startAt=new Date(`${date.value}T${start.value}`),endAt=new Date(`${date.value}T${end.value}`);if(!title.value.trim()||Number.isNaN(startAt.getTime())||!(endAt>startAt)){feedback.textContent='Add a title, a start, and a later end.';return;}write({action:editing?'update':'create',id:editing?.id,title:title.value.trim(),start:startAt.toISOString(),end:endAt.toISOString()},feedback);};
+  form.append(feedback);return form;
+ }
+ async function write(body,feedback){
+  feedback.textContent=body.action==='delete'?'Deleting event…':'Saving event…';
+  try{const r=await api('calendar',{company:asked,...body});if(!live())return;if(r.unavailable||r.connected===false){feedback.textContent=r.message||'The event was not saved. Try again.';return;}editing=null;load(true);}
+  catch{if(live())feedback.textContent='The event was not saved. Try again.';}
+ }
  function paint(result){
-  wrap.replaceChildren();
+  last=result;wrap.replaceChildren();
   if(result.connected===false){const note=el('p','sd-calendar-status','No calendar is connected for '+asked+'.');wrap.append(note,button('Connect calendar',()=>{note.textContent='Ask your administrator to connect the Google calendar for '+asked+'. Calendar connection is managed by your administrator.';},'sd-calendar-connect'));return;}
   const toolbar=el('div','sd-calendar-toolbar');toolbar.append(el('h2','',calendarMonth.toLocaleDateString([],{month:'long',year:'numeric'})),button('Previous month',()=>move(-1)),button('Today',()=>{calendarMonth=new Date(new Date().getFullYear(),new Date().getMonth(),1);load(true);}),button('Next month',()=>move(1)));wrap.append(toolbar,status);
   status.textContent=result.message||(result.events?.length?'Times shown in '+Intl.DateTimeFormat().resolvedOptions().timeZone+'.':'No events this month. Times shown in '+Intl.DateTimeFormat().resolvedOptions().timeZone+'.');
+  if(!result.unavailable)wrap.append(eventForm());
   wrap.append(grid(result.unavailable?[]:result.events||[]));
  }
  function move(delta){calendarMonth=new Date(calendarMonth.getFullYear(),calendarMonth.getMonth()+delta,1);load(true);}
  async function load(force=false){
   if(!live()||loading&&!force)return;loading=true;const current=++version;
   if(force||!wrap.children.length){wrap.replaceChildren(status);status.textContent='Loading calendar…';}
-  try{const result=await api('calendar?company='+encodeURIComponent(asked)+'&month='+key(calendarMonth).slice(0,7));if(live()&&current===version)paint(result);}
+  try{const response=await fetch('/kioskx-hired-desk/calendar?company='+encodeURIComponent(asked)+'&month='+key(calendarMonth).slice(0,7),{headers:{Authorization:'Bearer '+token()},cache:'no-store'});if(!live()||current!==version)return;if(response.status===401||response.status===403){wrap.replaceChildren(status,button('Retry',()=>load(true)));status.textContent='Sign in on the support desk to manage this calendar.';return;}if(!response.ok)throw Error();const result=await response.json();if(wrap.querySelector('.sd-calendar-form :focus'))return;paint(result);}
   catch{if(live()&&current===version){wrap.replaceChildren(status,button('Retry',()=>load(true)));status.textContent='Calendar is temporarily unavailable. Please try again.';}}
   finally{if(current===version)loading=false;}
  }

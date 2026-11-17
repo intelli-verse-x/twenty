@@ -24,10 +24,33 @@ export const hiredRequestAllowed = (
   }
   return (
     (request.method === 'GET' &&
-      ['/kioskx-hired-desk/session', '/kioskx-hired-desk/leads', '/kioskx-hired-desk/voice-config'].includes(
-        path,
-      )) ||
+      [
+        '/kioskx-hired-desk/calendar',
+        '/kioskx-hired-desk/applications',
+        '/kioskx-hired-desk/application-resume',
+        '/kioskx-hired-desk/voice-session',
+        '/kioskx-hired-desk/crew-jobs',
+        '/kioskx-hired-desk/company-mail',
+        '/kioskx-hired-desk/company-engagement',
+        '/kioskx-hired-desk/session',
+        '/kioskx-hired-desk/queues',
+        '/kioskx-hired-desk/leads',
+        '/kioskx-hired-desk/voice-config',
+      ].includes(path)) ||
     (request.method === 'POST' &&
-      ['/kioskx-hired-desk/call', '/kioskx-hired-desk/email', '/kioskx-hired-desk/voice-bridge'].includes(path))
+      [
+        '/kioskx-hired-desk/calendar',
+        '/kioskx-hired-desk/crew-assign',
+        '/kioskx-hired-desk/company-reply',
+        '/kioskx-hired-desk/company-send',
+        '/kioskx-hired-desk/company-site',
+        '/kioskx-hired-desk/notes',
+        '/kioskx-hired-desk/queue-work',
+        '/kioskx-hired-desk/queue-send',
+        '/kioskx-hired-desk/call',
+        '/kioskx-hired-desk/voice-bridge',
+        '/kioskx-hired-desk/email',
+        '/kioskx-hired-desk/activity',
+      ].includes(path))
   );
 };
