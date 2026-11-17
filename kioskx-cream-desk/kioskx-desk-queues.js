@@ -179,7 +179,45 @@ function renderIntegrations(page){
  left.append(c,mailbox,card('4  ROUTING RULES','Routing cannot be changed from this screen.'));right.append(connected,how);layout.append(left,right);page.append(layout);
 }
 function table(headers,records){const t=el('table'),head=el('thead'),tr=el('tr');headers.forEach(h=>tr.append(el('th','',h)));head.append(tr);const body=el('tbody');for(const record of records){const row=el('tr');record.forEach(v=>row.append(el('td','',v)));body.append(row);}t.append(head,body);const wrap=el('div','sd-card sd-table');wrap.append(t);return wrap;}
-function renderCalendar(page){page.append(el('h2','','support@anideebee.com'),card('Calendar not connected','The support@anideebee.com calendar is not connected.'));}
+let calendarMonth=new Date(new Date().getFullYear(),new Date().getMonth(),1),calendarPoll;
+function renderCalendar(page){
+ clearInterval(calendarPoll);
+ const asked=company,live=()=>page.isConnected&&company===asked&&queue==='calendar';
+ const wrap=el('div','sd-calendar'),status=el('p','sd-calendar-status','Loading calendar…');status.setAttribute('role','status');page.append(wrap);
+ const style=el('style');style.textContent=`.sd-calendar{font-family:Arial,sans-serif;min-width:0}.sd-calendar-toolbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:20px 0}.sd-calendar-toolbar h2{margin:0 auto 0 0!important;font-family:inherit!important}.sd-calendar-scroll{overflow-x:auto}.sd-calendar-grid{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));min-width:560px;border-top:1px solid #cbd5e1;border-left:1px solid #cbd5e1}.sd-calendar-weekday,.sd-calendar-day{padding:8px;border-right:1px solid #cbd5e1;border-bottom:1px solid #cbd5e1}.sd-calendar-weekday{background:#e8edf3;font-weight:600}.sd-calendar-day{min-height:112px;background:#fff;min-width:0}.sd-calendar-outside{background:#f1f5f9;color:#64748b}.sd-calendar-number{display:inline-grid;place-items:center;width:28px;height:28px;margin-bottom:6px}.sd-calendar-today .sd-calendar-number{border-radius:50%;background:#1f3a5f;color:white;font-weight:700}.sd-calendar-event{display:block;background:#e4edff;color:#173458;border-left:3px solid #42699c;border-radius:4px;padding:5px;margin:3px 0;font-size:12px;overflow-wrap:anywhere}.sd-calendar-event time{display:block;font-weight:700}.sd-calendar-status{color:#334155;line-height:1.5}.sd-calendar-toolbar button{min-height:40px}.sd-calendar-connect{margin-top:16px}`;page.append(style);
+ let version=0,loading=false;
+ const key=d=>`${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,'0')}-${String(d.getDate()).padStart(2,'0')}`;
+ function grid(events){
+  const scroll=el('div','sd-calendar-scroll'),g=el('div','sd-calendar-grid');g.setAttribute('aria-label','Month calendar');scroll.append(g);
+  for(const day of ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'])g.append(el('div','sd-calendar-weekday',day));
+  const first=new Date(calendarMonth);first.setDate(1-first.getDay());const last=new Date(calendarMonth.getFullYear(),calendarMonth.getMonth()+1,0),count=Math.ceil((calendarMonth.getDay()+last.getDate())/7)*7;
+  for(let i=0;i<count;i++){
+   const date=new Date(first);date.setDate(first.getDate()+i);const dayKey=key(date),cell=el('div','sd-calendar-day'+(date.getMonth()!==calendarMonth.getMonth()?' sd-calendar-outside':'')+(dayKey===key(new Date())?' sd-calendar-today':''));cell.dataset.date=dayKey;cell.setAttribute('aria-label',date.toLocaleDateString([],{dateStyle:'full'}));const number=el('span','sd-calendar-number',date.getDate());if(dayKey===key(new Date()))number.setAttribute('aria-current','date');cell.append(number);
+   for(const event of events){
+    const start=event.allDay?event.start:key(new Date(event.start)),end=event.allDay?event.end:key(new Date(new Date(event.end).getTime()-1));
+    if(!start||dayKey<start||(event.allDay?dayKey>=(end||start+'z'):dayKey>(end||start)))continue;
+    const chip=el('div','sd-calendar-event'),when=event.allDay?'All day':dayKey===start?new Date(event.start).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'}):'Continues';chip.append(el('time','',when),el('span','',event.title));cell.append(chip);
+   }g.append(cell);
+  }return scroll;
+ }
+ function paint(result){
+  wrap.replaceChildren();
+  if(result.connected===false){const note=el('p','sd-calendar-status','No calendar is connected for '+asked+'.');wrap.append(note,button('Connect calendar',()=>{note.textContent='Ask your administrator to connect the Google calendar for '+asked+'. Calendar connection is managed by your administrator.';},'sd-calendar-connect'));return;}
+  const toolbar=el('div','sd-calendar-toolbar');toolbar.append(el('h2','',calendarMonth.toLocaleDateString([],{month:'long',year:'numeric'})),button('Previous month',()=>move(-1)),button('Today',()=>{calendarMonth=new Date(new Date().getFullYear(),new Date().getMonth(),1);load(true);}),button('Next month',()=>move(1)));wrap.append(toolbar,status);
+  status.textContent=result.message||(result.events?.length?'Times shown in '+Intl.DateTimeFormat().resolvedOptions().timeZone+'.':'No events this month. Times shown in '+Intl.DateTimeFormat().resolvedOptions().timeZone+'.');
+  wrap.append(grid(result.unavailable?[]:result.events||[]));
+ }
+ function move(delta){calendarMonth=new Date(calendarMonth.getFullYear(),calendarMonth.getMonth()+delta,1);load(true);}
+ async function load(force=false){
+  if(!live()||loading&&!force)return;loading=true;const current=++version;
+  if(force||!wrap.children.length){wrap.replaceChildren(status);status.textContent='Loading calendar…';}
+  try{const result=await api('calendar?company='+encodeURIComponent(asked)+'&month='+key(calendarMonth).slice(0,7));if(live()&&current===version)paint(result);}
+  catch{if(live()&&current===version){wrap.replaceChildren(status,button('Retry',()=>load(true)));status.textContent='Calendar is temporarily unavailable. Please try again.';}}
+  finally{if(current===version)loading=false;}
+ }
+ load();calendarPoll=setInterval(()=>{if(!live()){clearInterval(calendarPoll);return;}load();},20000);
+}
+
 function renderCompanies(page){
  page.append(el('p','sd-subtitle','Each company has its own App ID, branding, mailbox and data'));
  const feedback=el('p','sd-feedback');feedback.setAttribute('role','status');const explain=()=>{feedback.textContent='A new company is not created from this screen yet.';};page.append(button('Add company',explain),feedback);
