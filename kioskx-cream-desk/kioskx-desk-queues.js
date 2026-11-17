@@ -9,7 +9,6 @@ const desks={
  'QuestX':{app:'questx',mail:'support@quest-x.ai',inbox:'https://inbox.intelli-verse-x.ai/app/accounts/1/inbox/103'},
  'IntelliVerse X':{app:'intelliverse',mail:'support@intelli-verse-x.ai',inbox:'https://inbox.intelli-verse-x.ai/app/accounts/1/inbox/100'},
  'ContentX Studio':{app:'contentx',mail:'support@content-x.ai',inbox:'https://inbox.intelli-verse-x.ai/app/accounts/1/inbox/102'},
- 'Foundrly':{app:'foundrly',mail:'info@getfoundrly.ai',inbox:'https://inbox.intelli-verse-x.ai/app/accounts/100/inbox/67'},
  'AniDeeBee':{app:null,mail:'support@anideebee.com',inbox:'https://inbox.intelli-verse-x.ai/app/accounts/1/inbox/3'}
 };
 const companies=Object.keys(desks);
@@ -56,33 +55,42 @@ function logOut(){
  native.click();
 }
 function render(){if(!host)return;const voice=document.querySelector('#kioskx-voice-connect');if(voice){delete voice.dataset.deskRequested;if(host.contains(voice))document.querySelector('.hired-desk').append(voice);}host.replaceChildren();const all=rows().filter(matchesCompany),current=all.find(r=>r.id===open);host.classList.toggle('sd-open',!!current);host.classList.toggle('sd-inbox-open',!!current&&queue==='inbox');const rail=el('aside','sd-rail');rail.setAttribute('aria-label','Support Desk');const brand=brandMark(),mark=el('img','sd-logo');mark.src='data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDgiIGhlaWdodD0iNDgiIHZpZXdCb3g9IjAgMCA0OCA0OCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPGcgY2xpcC1wYXRoPSJ1cmwoI2NsaXAwXzI0XzMyKSI+CjxwYXRoIGQ9Ik0zNiAwSDEyQzUuMzcyNTggMCAwIDUuMzcyNTggMCAxMlYzNkMwIDQyLjYyNzQgNS4zNzI1OCA0OCAxMiA0OEgzNkM0Mi42Mjc0IDQ4IDQ4IDQyLjYyNzQgNDggMzZWMTJDNDggNS4zNzI1OCA0Mi42Mjc0IDAgMzYgMFoiIGZpbGw9IiMxRjNBNUYiLz4KPHBhdGggZD0iTTE1IDEyLjVWMjVDMTUgMjcuMzg2OSAxNS45NDgyIDI5LjY3NjEgMTcuNjM2IDMxLjM2NEMxOS4zMjM5IDMzLjA1MTggMjEuNjEzMSAzNCAyNCAzNEMyNi4zODY5IDM0IDI4LjY3NjEgMzMuMDUxOCAzMC4zNjQgMzEuMzY0QzMyLjA1MTggMjkuNjc2MSAzMyAyNy4zODY5IDMzIDI1VjEyLjUiIHN0cm9rZS13aWR0aD0iNC42IiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiIHN0cm9rZT0id2hpdGUiLz4KPHBhdGggZD0iTTI0IDIwLjZDMjUuODc3OCAyMC42IDI3LjQgMTkuMDc3OCAyNy40IDE3LjJDMjcuNCAxNS4zMjIzIDI1Ljg3NzggMTMuOCAyNCAxMy44QzIyLjEyMjIgMTMuOCAyMC42IDE1LjMyMjMgMjAuNiAxNy4yQzIwLjYgMTkuMDc3OCAyMi4xMjIyIDIwLjYgMjQgMjAuNloiIGZpbGw9IiM4RkI0RkYiLz4KPC9nPgo8ZGVmcz4KPGNsaXBQYXRoIGlkPSJjbGlwMF8yNF8zMiI+CjxyZWN0IHdpZHRoPSI0OCIgaGVpZ2h0PSI0OCIgZmlsbD0id2hpdGUiLz4KPC9jbGlwUGF0aD4KPC9kZWZzPgo8L3N2Zz4K';mark.alt='';brand.querySelector('.sl-mark').replaceWith(mark);rail.append(brand,el('span','sd-sr-only','Support Desk'));
-const switcher=el('label','sd-switcher');switcher.append(el('span','sd-brand','COMPANY / APP ID'));const switchLine=el('div','sd-switch-line');const dots=el('span','sd-dots');dots.setAttribute('aria-hidden','true');dots.append(el('i'),el('i'),el('i'));const select=el('select');select.setAttribute('aria-label','Company');for(const c of companies){const o=el('option','',c==='All'?'All companies':c);o.value=c;select.append(o);}select.value=company;select.onchange=()=>{remember();company=select.value;queue=queue==='call'?'call':'inbox';open='';search='';render();};switchLine.append(dots,select);switcher.append(switchLine);rail.append(switcher);
+const switcher=el('label','sd-switcher');switcher.append(el('span','sd-brand','COMPANY / APP ID'));const switchLine=el('div','sd-switch-line');const dots=el('span','sd-dots');dots.setAttribute('aria-hidden','true');dots.append(el('i'),el('i'),el('i'));const select=el('select');select.setAttribute('aria-label','Company');for(const c of companies){const o=el('option','',c==='All'?'All companies':c);o.value=c;select.append(o);}select.value=company;select.onchange=()=>{remember();company=select.value;queue=['call','engagement'].includes(queue)?queue:'inbox';open='';search='';render();};switchLine.append(dots,select);switcher.append(switchLine);rail.append(switcher);
 const nav=el('nav');nav.setAttribute('aria-label','Desk');for(const k of ['inbox','call','engagement','today','queues','knowledge','insights','integrations','companies','calendar']){const b=button(names[k],()=>navigate(k));b.setAttribute('aria-pressed',String(k===queue||(k==='queues'&&queueKeys.includes(queue))));if(k==='today')b.append(el('span','',activity().filter(t=>matchesCompany(t.row)).length));nav.append(b);if(k==='queues'&&(queue==='queues'||queueKeys.includes(queue)))for(const q of queueKeys.filter(q=>matchesCompany({queue:q}))){const qb=button(names[q],()=>navigate(q),'sd-subnav');qb.append(el('span','',all.filter(r=>r.queue===q&&statusOf(r)!=='Done').length));qb.setAttribute('aria-pressed',String(q===queue));nav.append(qb);}}rail.append(nav);const assistant=card('AI assistant','Drafts replies and finds articles. Never sends by itself.');assistant.classList.add('sd-assistant');rail.append(assistant);const account=el('footer','sd-account');account.append(el('strong','sd-session-name',sessionName()),button('Log out',logOut),el('p','sd-access-status',accessNotice),el('p','sd-session-status'));rail.append(account);host.append(rail);
 if(queue==='inbox'||queue==='call'){renderEmbed();return;}
 if(!queueKeys.includes(queue)){const page=el('section','sd-page sd-page-'+queue);page.append(el('h1','',queue==='integrations'?'Connect a company mailbox':queue==='companies'?'Companies and access':names[queue]));host.append(page);if(queue==='engagement')renderEngagement(page);if(queue==='today')renderToday(page,all);if(queue==='queues')renderQueues(page,all);if(queue==='knowledge')renderKnowledge(page);if(queue==='insights')renderInsights(page,all);if(queue==='integrations')renderIntegrations(page);if(queue==='companies')renderCompanies(page);if(queue==='calendar')renderCalendar(page);pageHeader(page);return;}
 const list=el('section','sd-list');list.setAttribute('aria-label','Request list');list.append(el('h1','',names[queue]),el('p','sd-subtitle',`${company==='All'?'All companies':company} · ${all.filter(r=>statusOf(r)!=='Done').length} open`));const input=el('input','sd-search');input.placeholder='Search name, company, email, request';input.setAttribute('aria-label',input.placeholder);input.value=search;input.oninput=()=>{search=input.value;paintRows();};if(current&&queue==='inbox')list.append(input);if(current&&queue==='inbox'){list.append(companyPills(),pills(['All','Email','Phone','Text','Web'],channel,v=>{remember();channel=v;render();}));}if(queue!=='inbox'||!current)list.append(today(!current&&activity().length>0));const results=el('div');list.append(results);function paintRows(){results.replaceChildren();let subset=all.filter(r=>(queue==='inbox'||(current&&queueKeys.includes(queue))||r.queue===queue)&&(!search||[displayName(r),companyOf(r),r.queue,r.queue==='kiosk'?'':r.email,r.summary,r.queue==='kiosk'?clean(r.message):r.message].join(' ').toLowerCase().includes(search.toLowerCase()))&&(channel==='All'||channel==='Web'||(r.thread||[]).some(t=>t.kind===({Email:'email',Phone:'call',Text:'sms'}[channel]))));if(data?.unavailable||data?.queues?.[queue]?.unavailable)results.append(el('p','sd-card sd-queue-unavailable','This queue is unavailable. Try refreshing.'));else if(!subset.length){results.append(el('p','sd-card',data?'No requests in this queue.':'Loading requests…'));if(data)results.append(el('p','sd-instruction','Read the request. Write the reply. Then Email, Call, or Text. Nothing is sent until you press one of those.'));}for(const r of subset)results.append(rowButton(r));}paintRows();if(queue!=='inbox'||!current)list.append(legend());host.append(list);if(current)detail(current);if(current&&queue==='inbox'){const header=el('header','sd-inbox-header');header.append(list.querySelector('h1'),list.querySelector('.sd-subtitle'),input);host.append(header);}else list.querySelector('.sd-subtitle')?.remove();}
 function renderEmbed(){
- const page=el('section','sd-embed'),header=el('header','sd-embed-header');
- header.append(el('h1','',names[queue]+' · '+company));
- const frame=el('iframe','sd-embed-frame');
- frame.setAttribute('sandbox','allow-scripts allow-forms allow-same-origin allow-popups');
- if(queue==='inbox'){
-  frame.title=company+' inbox';
-  const status=el('p','sd-muted','Opening the mailbox…');
-  header.append(status);
-  const asked=company;
-  api('inbox-login?company='+encodeURIComponent(company)).then(result=>{
-   if(!frame.isConnected||company!==asked)return;
-   if(typeof result.url==='string'&&result.url.startsWith('https://inbox.intelli-verse-x.ai/app/login?')&&result.url.includes('sso_auth_token=')){status.remove();frame.src=result.url;}
-   else status.textContent='Inbox sign-in is not available.';
-  }).catch(()=>{if(frame.isConnected)status.textContent='Inbox sign-in is not available.';});
- }else{
-  frame.src='https://fonoster.intelli-verse-x.ai/';frame.title=company+' Fonoster desk';
-  frame.setAttribute('allow','microphone');
+ const asked=company,page=el('section','sd-embed sd-mail'),header=el('header','sd-embed-header');
+ header.append(el('h1','',queue==='inbox'?company+' · '+desks[company].mail:'Call · '+company));page.append(header);host.append(page);
+ if(queue==='call'){page.append(el('p','sd-card','Voice Studio sign-in is not available.'),el('p','sd-card','Quo is not connected.'));return;}
+ const layout=el('div','sd-mail-layout'),list=el('section','sd-mail-list'),thread=el('section','sd-mail-thread');list.setAttribute('aria-label','Company conversations');thread.setAttribute('aria-label','Mail thread');layout.append(list,thread);page.append(layout);
+ const live=()=>page.isConnected&&company===asked;let pageNo=1,selected=null,threadVersion=0;
+ const emptyThread=()=>thread.replaceChildren(el('p','sd-muted','Choose a conversation to read and reply.'));emptyThread();
+ const error=where=>{where.replaceChildren(el('p','sd-muted','Mail is unavailable. Try refreshing.'),button('Refresh',()=>loadList()));};
+ async function loadList(){
+  selected=null;threadVersion++;emptyThread();list.replaceChildren(el('p','sd-muted','Loading mail…'));
+  try{const result=await api('company-mail?company='+encodeURIComponent(asked)+'&page='+pageNo);if(!live())return;
+   if(result.unavailable||!Array.isArray(result.conversations)){error(list);return;}
+   list.replaceChildren();if(!result.conversations.length)list.append(el('p','sd-mail-empty',pageNo===1?'No mail for '+asked+' yet.':'No more conversations.'));
+   for(const row of result.conversations){const b=button('',()=>openThread(row),'sd-mail-row');b.append(el('strong','',row.name),el('span','',row.preview),el('small','',row.status));list.append(b);}
+   const paging=el('div','sd-mail-paging');const prev=button('Previous',()=>{pageNo--;loadList();}),next=button('Next',()=>{pageNo++;loadList();});prev.disabled=pageNo===1;next.disabled=!result.more;paging.append(prev,el('span','','Page '+pageNo),next,button('Refresh',loadList));list.append(paging);
+  }catch{if(live())error(list);}
  }
- page.append(header,frame);
- if(queue==='call')page.append(el('p','sd-embed-status','Quo is not connected. No Quo key is stored.'));
- host.append(page);
+ async function openThread(row){
+  const version=++threadVersion;selected=row.id;thread.replaceChildren(el('p','sd-muted','Loading conversation…'));
+  try{const result=await api('company-mail?company='+encodeURIComponent(asked)+'&conversation='+row.id);if(!live()||version!==threadVersion)return;
+   if(result.unavailable){error(thread);return;}
+   thread.replaceChildren(el('h2','',row.name));const messages=el('div','sd-mail-messages');messages.setAttribute('aria-label','Messages');thread.append(messages);
+   const paint=(items,prepend=false)=>{const fragment=document.createDocumentFragment();for(const m of items){const box=el('article','sd-mail-message '+m.direction);box.append(el('small','',m.direction==='received'?'Customer':'Reply · '+asked),el('p','',m.text||'Message with attachment'));if(m.attachments)box.append(el('p','sd-muted',m.attachments+' attachment(s) in the original message.'));fragment.append(box);}prepend?messages.prepend(fragment):messages.append(fragment);};paint(result.messages||[]);
+   let older=result.older;const earlier=button('Earlier messages',async()=>{earlier.disabled=true;try{const r=await api('company-mail?company='+encodeURIComponent(asked)+'&conversation='+row.id+'&before='+older);if(!live()||version!==threadVersion)return;if(r.unavailable)throw Error();paint(r.messages||[],true);older=r.older;earlier.hidden=!older;}catch{earlier.textContent='Retry earlier messages';}finally{earlier.disabled=false;}});earlier.hidden=!older;thread.insertBefore(earlier,messages);
+   const form=el('form','sd-mail-reply'),label=el('label','','Reply from '+desks[asked].mail),field=el('textarea');field.setAttribute('aria-label','Mailbox reply');field.placeholder='Write your reply';field.maxLength=10000;label.append(field);
+   const status=el('p','sd-feedback');status.setAttribute('role','status');const send=button('Send');send.type='submit';send.disabled=true;let submitted=false;field.oninput=()=>{send.disabled=submitted||!field.value.trim();};
+   form.onsubmit=async event=>{event.preventDefault();if(submitted||!field.value.trim()||!live()||selected!==row.id)return;submitted=true;send.disabled=true;field.disabled=true;status.textContent='Submitting reply…';try{const r=await api('company-reply',{company:asked,conversation:row.id,text:field.value});if(!live()||version!==threadVersion)return;status.textContent=r.message||'Delivery is unconfirmed. Do not resend.';if(r.status==='accepted'){paint([{direction:'sent',text:field.value}]);field.value='';submitted=false;field.disabled=false;}if(['blocked','unavailable'].includes(r.status)){submitted=false;field.disabled=false;send.disabled=!field.value.trim();}}catch{if(live())status.textContent='Delivery is unconfirmed. Do not resend.';}};
+   form.append(label,send,status);thread.append(form);
+  }catch{if(live()&&version===threadVersion)error(thread);}
+ }
+ loadList();
 }
 function pageHeader(page){const header=el('header','sd-page-header');header.append(page.querySelector('h1'));const subtitle=page.querySelector('.sd-subtitle');if(subtitle)header.append(subtitle);const tools=el('div','sd-header-tools');if(queue==='knowledge'){const search=el('input','sd-article-search');search.placeholder='Search articles';search.setAttribute('aria-label','Search articles');search.oninput=()=>{for(const row of page.querySelectorAll('.sd-article'))row.hidden=!row.textContent.toLowerCase().includes(search.value.toLowerCase());};tools.append(search);}if(queue==='knowledge'||queue==='companies'){const action=page.querySelector(':scope > button');if(action)tools.append(action);}if(queue==='insights'){const periods=page.querySelector('.sd-pills');if(periods)tools.append(periods);}header.append(tools);page.prepend(header);}
 function renderToday(page,all){const a=activity().filter(t=>matchesCompany(t.row));page.append(el('p','sd-subtitle',new Date().toLocaleDateString([],{weekday:'long'})+' · '+a.length+' actions sent'),kpis([['Emails sent',a.filter(t=>t.kind==='email').length],['Calls placed',a.filter(t=>t.kind==='call').length],['Texts sent',a.filter(t=>t.kind==='sms').length]]),companyPills());const log=card('TODAY');if(unavailable())log.append(el('p','','Today: activity unavailable.'));else if(!a.length)log.append(el('p','','Today: nothing sent.'));for(const t of a){const line=el('div','sd-log-row');line.append(el('time','',time(t.time)),chip(companyOf(t.row)),el('span','',names[t.row.queue]+' — '+displayName(t.row)),chip(t.kind==='email'?'Email sent':t.kind==='sms'?'Text sent':t.status==='queued'?'Call queued':'Call placed'));log.append(line);}page.append(log,el('p','sd-muted','No email addresses or phone numbers are shown in Today.'));const todo=card('STILL TO DO TODAY');for(const r of all.filter(r=>['New','Call next'].includes(statusOf(r))))todo.append(rowButton(r));if(!todo.querySelector('.sd-row'))todo.append(el('p','','No requests need a first contact or call.'));todo.append(button('Open Queues',()=>navigate('queues')));const aside=el('aside','sd-today-aside');aside.append(todo,legend());page.append(aside);}
@@ -102,25 +110,24 @@ function renderInsights(page,all){page.append(pills(['Today','7 days','30 days']
 // No webhook credential or app grant is readable from this deployment.
 // Do not infer connectivity from the SMS or mail transport credentials.
 function renderEngagement(page){
- const desk=desks[company];
- page.append(el('p','sd-subtitle',company+' · App ID: '+appIds[company]));
- const tools=card('Engagement tools');
- const inbox=button('Chatwoot inbox',()=>navigate('inbox'));
- const calls=button('Fonoster',()=>navigate('call'));
- tools.append(inbox,calls,el('p','','Notifuse · Email campaigns for '+company),el('p','','Telnyx SMS · Consent required. India numbers are blocked.'),el('p','','n8n lead automation · '+appIds[company]),el('p','','Quo is not connected. No Quo key is stored.'));
- page.append(tools);
- const form=el('form','sd-card sd-lead-form');form.append(el('h3','','Outbound lead'));
- const input=(label,type)=>{const wrap=el('label'),field=el('input');field.type=type;field.setAttribute('aria-label',label);wrap.append(el('span','',label),field);form.append(wrap);return field;};
- const app=input('App ID','text');app.value=appIds[company];app.readOnly=true;
- const name=input('Name','text'),email=input('Email','email'),phone=input('Phone','tel');phone.placeholder='+1 202 555 0100';
- const emailConsent=input('Consent to email','checkbox'),smsConsent=input('Consent to SMS','checkbox');
- const status=el('p','sd-feedback');status.setAttribute('role','status');
- const send=button('Send');send.type='submit';send.disabled=true;
- const india=()=>/^(?:\+|00)?91/.test(phone.value.replace(/[\s().-]/g,''));
- const validate=()=>{send.disabled=true;status.textContent=india()?'India numbers are blocked. This lead will not be sent.':'Lead automation is not connected from this desk.';};
- for(const field of [name,email,phone,emailConsent,smsConsent])field.addEventListener('input',validate);
- form.onsubmit=e=>{e.preventDefault();validate();};
- form.append(send,status);validate();page.append(form);
+ const asked=company,desk=desks[asked];page.append(el('p','sd-subtitle',asked+' · App ID: '+appIds[asked]));
+ const status=el('p','sd-feedback','Loading company tools…');page.append(status);
+ api('company-engagement?company='+encodeURIComponent(asked)).then(state=>{
+  if(!page.isConnected||company!==asked)return;status.textContent=state.missing||'Company tools are unavailable.';
+  if(!state.lead&&!state.sms)return;
+  const form=el('form','sd-card sd-lead-form');form.append(el('h3','','Contact a lead for '+asked));
+  const input=(label,type)=>{const wrap=el('label'),f=el('input');f.type=type;f.setAttribute('aria-label',label);wrap.append(el('span','',label),f);form.append(wrap);return f;};
+  const app=input('App ID','text');app.value=desk.app;app.readOnly=true;
+  const action=el('select');action.setAttribute('aria-label','Action');for(const [value,label,on]of [['lead','Save lead to CRM via n8n',state.lead],['sms','Send text via Telnyx',state.sms]])if(on){const o=el('option','',label);o.value=value;action.append(o);}form.append(action);
+  const name=input('Name','text'),email=input('Email','email'),phone=input('Phone','tel'),message=el('textarea');phone.placeholder='+1';message.setAttribute('aria-label','Text message');message.maxLength=1600;form.append(message);
+  const consent=input('Consent to email','checkbox'),smsConsent=input('Consent to SMS','checkbox');
+  const hint=el('p','sd-muted'),feedback=el('p','sd-feedback');feedback.setAttribute('role','status');const send=button('Send');send.type='submit';let submitting=false;
+  const us=()=>/^\+1[2-9]\d{2}[2-9]\d{6}$/.test(phone.value.replace(/[\s().-]/g,''));
+  const validate=()=>{const sms=action.value==='sms';message.hidden=!sms;hint.textContent=sms?'Your text starts with '+asked+'. Send submits this message to Telnyx.':'Send saves this lead to '+asked+' in the CRM through n8n. It does not send an email.';send.disabled=submitting||(phone.value&&!us())||(sms?(!phone.value||!smsConsent.checked||!message.value.trim()):(!email.validity.valid||!email.value||!consent.checked));feedback.textContent=phone.value&&!us()?'Only US numbers are allowed. India numbers are blocked.':'';};
+  for(const f of [name,email,phone,message,consent,smsConsent,action])f.addEventListener('input',validate);action.onchange=validate;
+  form.onsubmit=async e=>{e.preventDefault();validate();if(send.disabled||!page.isConnected||company!==asked)return;submitting=true;send.disabled=true;for(const f of form.querySelectorAll('input,textarea,select'))f.disabled=true;feedback.textContent='Submitting…';try{const r=await api('company-send',{company:asked,kind:action.value,name:name.value,email:email.value,phone:phone.value,text:message.value,emailConsent:consent.checked,smsConsent:smsConsent.checked});if(page.isConnected&&company===asked)feedback.textContent=r.message;}catch{if(page.isConnected)feedback.textContent='Outcome is unconfirmed. Do not resend.';}};
+  form.append(hint,send,feedback);page.append(form);validate();
+ }).catch(()=>{if(page.isConnected)status.textContent='Company tools are unavailable. Try refreshing.';});
 }
 function renderIntegrations(page){
  page.append(el('p','sd-subtitle','Integrations › Email · one mailbox per company, one App ID per company'));
@@ -371,7 +378,19 @@ body .hired-desk #kioskx-voice-connect[data-desk-requested]{display:block!import
 body .hired-desk #kioskx-voice-connect button{color:#1f3a5f!important;border-color:#dce2ec!important;padding:8px!important;font-size:12px!important}
 body .hired-desk #kioskx-voice-connect a{color:#2f5f8a}
 #support-desk .sd-queue-unavailable{background:#f6ddd8;border-color:#a63d2f;color:#a63d2f;font-weight:700}
-#support-desk .sd-lead-form{max-width:680px}#support-desk .sd-lead-form label{display:flex;gap:12px;align-items:center;margin:12px 0}#support-desk .sd-lead-form label span{min-width:145px}#support-desk .sd-lead-form input:not([type=checkbox]){flex:1;min-width:0;padding:10px;border:1px solid #dce2ec;border-radius:6px}#support-desk .sd-access-status{font-size:11px;color:#64748b}#support-desk .sd-embed{position:absolute;left:232px;right:0;top:0;bottom:0;display:flex;flex-direction:column;min-width:0;background:#f3f5f9;overflow:hidden;z-index:1}
+#support-desk .sd-lead-form{max-width:680px}#support-desk .sd-lead-form label{display:flex;gap:12px;align-items:center;margin:12px 0}#support-desk .sd-lead-form label span{min-width:145px}#support-desk .sd-lead-form input:not([type=checkbox]){flex:1;min-width:0;padding:10px;border:1px solid #dce2ec;border-radius:6px}#support-desk .sd-access-status{font-size:11px;color:#64748b}#support-desk .sd-mail{display:flex;flex-direction:column;background:#f3f5f9}
+#support-desk .sd-mail-layout{display:grid;grid-template-columns:320px minmax(0,1fr);flex:1;min-height:0}
+#support-desk .sd-mail-list{overflow:auto;border-right:1px solid #dce2ec;background:#f8fafc;padding:12px}
+#support-desk .sd-mail-row{display:flex;flex-direction:column;text-align:left;width:100%;padding:16px;border:1px solid #dce2ec;background:white;margin-bottom:8px;gap:8px;color:#1f3a5f}
+#support-desk .sd-mail-row span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap;max-width:100%}
+#support-desk .sd-mail-thread{display:flex;flex-direction:column;overflow:auto;padding:24px;min-width:0;gap:12px}
+#support-desk .sd-mail-messages{flex:1;overflow:auto;min-height:120px}
+#support-desk .sd-mail-message{padding:12px 16px;border:1px solid #dce2ec;background:white;border-radius:8px;margin-bottom:12px;white-space:pre-wrap;overflow-wrap:anywhere}
+#support-desk .sd-mail-message.sent{background:#e8eef6}
+#support-desk .sd-mail-reply textarea{display:block;width:100%;min-height:110px;margin:8px 0}
+#support-desk .sd-mail-paging{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+@media(max-width:760px){#support-desk .sd-mail-layout{grid-template-columns:1fr;overflow:auto}#support-desk .sd-mail-list{max-height:240px}#support-desk .sd-mail-thread{min-height:420px}}
+#support-desk .sd-embed{position:absolute;left:232px;right:0;top:0;bottom:0;display:flex;flex-direction:column;min-width:0;background:#f3f5f9;overflow:hidden;z-index:1}
 #support-desk .sd-embed-header{padding:16px 24px;border-bottom:1px solid #dce2ec;flex:none}
 #support-desk .sd-embed-frame{display:block;width:100%;flex:1 1 auto;min-height:0;border:0;background:#fff}
 @media(max-width:850px){#support-desk .sd-embed{position:relative;left:auto;right:auto;top:auto;bottom:auto;height:calc(100dvh - 180px);min-height:520px}}

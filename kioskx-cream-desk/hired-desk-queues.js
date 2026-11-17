@@ -1,4 +1,5 @@
 const reach = require('./reach');
+const companyDesk = require('./desk-company');
 const { BadRequestException } = require('@nestjs/common');
 const { Client } = require('pg');
 const QUEUES = { cleaning: 'cleaning_request', cars: 'car_request', jobs: 'job_application' };
@@ -154,18 +155,18 @@ async function guardedSend(send) {
     return send();
 }
 const INBOX_LOGIN = {
-    'Kiosk X':[1,1],'ToBa Tech':[34,1],'QuizVerse':[1,1],'QuestX':[1,1],
-    'IntelliVerse X':[1,1],'ContentX Studio':[1,1],'Foundrly':[100,133],'AniDeeBee':[1,1]
+    'Kiosk X':[1,101],'ToBa Tech':[34,36],'QuizVerse':[1,2],'QuestX':[1,103],
+    'IntelliVerse X':[1,100],'ContentX Studio':[1,102],'AniDeeBee':[1,3]
 };
 async function inboxLogin(company, env = process.env, request = fetch) {
     const unavailable = () => ({message:'Inbox sign-in is not available.'});
     if (!Object.hasOwn(INBOX_LOGIN, company || '')) return unavailable();
-    const [account,user] = INBOX_LOGIN[company];
+    const [account,inbox] = INBOX_LOGIN[company];
     if (!env.CHATWOOT_API_URL || !env.CHATWOOT_PLATFORM_TOKEN) return unavailable();
     try {
         const base = new URL(env.CHATWOOT_API_URL);
         if (base.protocol !== 'https:') return unavailable();
-        const response = await request(new URL(`/platform/api/v1/users/${user}/login`, base), {
+        const response = await request(new URL('/platform/api/v1/users/1/login', base), {
             method:'GET', redirect:'error', headers:{api_access_token:env.CHATWOOT_PLATFORM_TOKEN},
             signal:AbortSignal.timeout(10000)
         });
@@ -174,10 +175,16 @@ async function inboxLogin(company, env = process.env, request = fetch) {
         const url = new URL(payload.url);
         if (url.origin !== base.origin || url.pathname !== '/app/login' || !url.searchParams.get('sso_auth_token')) return unavailable();
         url.searchParams.set('sso_account_id', String(account));
-        return {url:url.href};
+        url.searchParams.delete('sso_conversation_id');
+        return {url:url.href,inbox:`https://inbox.intelli-verse-x.ai/app/accounts/${account}/inbox/${inbox}`};
     } catch { return unavailable(); }
 }
 class QueueController {
+    async companyMail(request) { await this.authorize(request); return companyDesk.mailRead(request.query || {}); }
+    async companyReply(request, body) { await this.authorize(request); return companyDesk.mailReply(body); }
+    async companyEngagement(request) { await this.authorize(request); return companyDesk.engagementState(request.query?.company); }
+    async companySend(request, body) { await this.authorize(request); return companyDesk.engagementSend(body); }
+
     async inboxLogin(request) { await this.authorize(request); return inboxLogin(request.query?.company); }
     async queues(request) { await this.authorize(request); return queueBoard(this.desk); }
     async queueWork(request, body) { await this.authorize(request); return saveWork(body, this.desk); }
@@ -200,7 +207,7 @@ class QueueController {
 }
 exports.install = Controller => {
     const common = require('@nestjs/common');
-    for (const [name, route, verb] of [['inboxLogin','inbox-login','Get'],['queues','queues','Get'],['queueWork','queue-work','Post'],['queueSend','queue-send','Post'],['call','call','Post'],['voiceBridge','voice-bridge','Post']]) {
+    for (const [name, route, verb] of [['companyMail','company-mail','Get'],['companyReply','company-reply','Post'],['companyEngagement','company-engagement','Get'],['companySend','company-send','Post'],['inboxLogin','inbox-login','Get'],['queues','queues','Get'],['queueWork','queue-work','Post'],['queueSend','queue-send','Post'],['call','call','Post'],['voiceBridge','voice-bridge','Post']]) {
         Object.defineProperty(Controller.prototype, name, Object.getOwnPropertyDescriptor(QueueController.prototype, name));
         const desc = Object.getOwnPropertyDescriptor(Controller.prototype, name);
         common[verb](route)(Controller.prototype, name, desc);
