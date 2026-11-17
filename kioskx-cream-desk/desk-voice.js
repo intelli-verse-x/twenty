@@ -28,7 +28,16 @@ async function proxy(req,res,s,{request=fetch,read=fs.readFileSync}={}){
   }
   let path=req.originalUrl.slice(PREFIX.length)||'/';
   if(!path.startsWith('/')||path.startsWith('//')||path.startsWith('/auth/'))throw Error();
-  const target=new URL(path,ORIGIN);if(target.pathname==='/__manifest'){const paths=target.searchParams.getAll('p');target.searchParams.delete('p');for(const p of paths)target.searchParams.append('p',p.startsWith(PREFIX+'/')?p.slice(PREFIX.length):p);path=target.pathname+target.search;}
+  const target=new URL(path,ORIGIN);
+  if(target.pathname==='/__manifest'){
+    const strip=p=>p===PREFIX?'/':p.startsWith(PREFIX+'/')?p.slice(PREFIX.length):p;
+    const single=target.searchParams.getAll('p');
+    target.searchParams.delete('p');
+    for(const p of single)target.searchParams.append('p',strip(p));
+    const joined=target.searchParams.get('paths');
+    if(joined)target.searchParams.set('paths',joined.split(',').map(strip).join(','));
+    path=target.pathname+target.search;
+  }
   const headers={cookie:s.cookies,accept:req.headers.accept||'*/*'};
   for(const key of ['x-grpc-web','x-user-agent','grpc-timeout','token','accesskeyid'])if(req.headers[key])headers[key]=req.headers[key];
   if(req.studioAuthorization)headers.authorization=req.studioAuthorization;
