@@ -1,10 +1,12 @@
 // Company boundaries are enforced on the server; no upstream credentials reach the page.
 const crypto = require('node:crypto');
+const markdown = require('markdown-it')({html:false,linkify:true,breaks:true});
+const {refreshMail} = require('./desk-mail-fetch');
 const reach = require('./reach');
 const {parsePhoneNumberFromString} = require('libphonenumber-js');
 const DESKS = {
  'Kiosk X': {app:'kioskx',mail:'support@kiosk-x.ai',account:1,inbox:101},
- 'AniDeeBee': {app:null,mail:'support@anideebee.com',account:1,inbox:3},
+ 'AniDeeBee': {app:'anideebee',mail:'support@anideebee.com',account:1,inbox:3},
  'QuizVerse': {app:'quizverse',mail:'support@quizverse.world',account:1,inbox:2},
  'QuestX': {app:'questx',mail:'support@quest-x.ai',account:1,inbox:103},
  'ContentX Studio': {app:'contentx',mail:'support@content-x.ai',account:1,inbox:102},
@@ -23,7 +25,7 @@ async function client(env=process.env,request=fetch) {
  if(!token)throw Error('Unavailable');
  return async(path,body)=>{
   const r=await request(new URL(path,base),{method:body?'POST':'GET',headers:{api_access_token:token,...(body?{'Content-Type':'application/json'}:{})},...(body?{body:JSON.stringify(body)}:{}),redirect:'error',signal:AbortSignal.timeout(15000)});
-  if(!r.ok)throw Error('Unavailable');
+  if(!r.ok){const error=Error('Unavailable');error.httpStatus=r.status;throw error;}
   return r.json();
  };
 }
@@ -36,7 +38,12 @@ async function conversation(api,desk,id) {
  return {row,path};
 }
 function messageDTO(company,m) {
- return {id:m.id,text:safeText(company,m.content||''),direction:m.message_type===0?'received':'sent',time:m.created_at,status:m.status||'',attachments:(m.attachments||[]).length};
+ const email=m.content_attributes?.email;
+ const stored=email?.html_content?.full||email?.html_content?.reply;
+ const text=String(m.content||'').replace(/^View image:\s*\((https?:\/\/[^\s)]+)\)\s*$/gm,'![Email image]($1)');
+ // Kiosk inquiries retain their masked plain-text boundary. Email HTML is sanitized by the renderer.
+ const html=company==='Kiosk X'?'':stored||markdown.render(text);
+ return {id:m.id,html,text:safeText(company,m.content||''),direction:m.message_type===0?'received':'sent',time:m.created_at,status:m.status||'',attachments:(m.attachments||[]).length};
 }
 async function mailRead(input, deps={}) {
  const desk=deskFor(input.company);
@@ -51,11 +58,12 @@ async function mailRead(input, deps={}) {
    const source=Array.isArray(data.payload)?data.payload:[];
    return {id:row.id,status:row.status,messages:source.filter(m=>!m.private&&[0,1].includes(m.message_type)).map(m=>messageDTO(input.company,m)),older:source.length>=20?source[0]?.id:null};
   }
+  const sync=input.refresh==='1'?await (deps.refresh||refreshMail)(desk,api):null;
   const page=positive(input.page)?Number(input.page):1;
   const data=await api(`/api/v1/accounts/${desk.account}/conversations?inbox_id=${desk.inbox}&status=all&assignee_type=all&page=${page}`);
   if(!Array.isArray(data.data?.payload))return failed;
   const source=data.data.payload;
-  return {company:input.company,mailbox:desk.mail,page,more:source.length>=20,conversations:source.filter(r=>Number(r.inbox_id)===desk.inbox).map(r=>({id:r.id,name:input.company==='Kiosk X'?'Kiosk inquiry':String(r.meta?.sender?.name||'Customer'),status:r.status,preview:safeText(input.company,r.messages?.[0]?.content||'Open conversation'),time:r.last_activity_at}))};
+  return {sync,company:input.company,mailbox:desk.mail,page,more:source.length>=20,conversations:source.filter(r=>Number(r.inbox_id)===desk.inbox).map(r=>({id:r.id,name:input.company==='Kiosk X'?'Kiosk inquiry':String(r.meta?.sender?.name||'Customer'),status:r.status,preview:safeText(input.company,r.messages?.[0]?.content||'Open conversation'),time:r.last_activity_at}))};
  }catch{return failed;}
 }
 // Uses the existing durable work ledger. An ambiguous upstream POST is never replayed.
@@ -65,7 +73,7 @@ async function once(repo,id,body,send) {
  if(prior)return {status:prior.status,message:prior.message};
  if(!await repo.claim(id,key,'email',body))return {status:'pending',message:'Already submitted. Refresh before doing anything else.'};
  let result;
- try{result=await send();}catch{result={status:'unknown',message:'Delivery is unconfirmed. Do not resend.'};}
+ try{result=await send();}catch(error){result=error.httpStatus>=400&&error.httpStatus<500&&error.httpStatus!==408?{status:'failed',message:'Reply was not sent. The mailbox rejected it; your draft is kept.'}:{status:'unknown',message:'Delivery is unconfirmed. Do not resend.'};}
  await repo.finish(key,{leadId:id,key,kind:'email',...result});
  return result;
 }
@@ -77,10 +85,10 @@ async function mailReply(input,deps={}) {
   const {path}=await conversation(api,desk,input.conversation);
   const work=async repo=>once(repo,`mail:${desk.account}:${desk.inbox}:${input.conversation}`,input.text,async()=>{
    const result=await api(path+'/messages',{content:input.text,message_type:'outgoing',private:false});
-   return result.id?{status:'accepted',message:'Reply queued in this mailbox.'}:{status:'unknown',message:'Delivery is unconfirmed. Do not resend.'};
+   return result.status==='failed'?{status:'failed',message:'Reply was not sent. Your draft is kept.'}:result.id?{status:'accepted',message:'Reply queued in this mailbox.'}:{status:'unknown',message:'Delivery is unconfirmed. Do not resend.'};
   });
   return deps.repo?work(deps.repo):reach.withStore(work);
- }catch{return {status:'unavailable',message:'Reply is unavailable. Refresh the thread.'};}
+ }catch{return {status:'unavailable',message:'Reply was not sent. Refresh the thread and try again.'};}
 }
 function engagementState(company,env=process.env) {
  const desk=deskFor(company);
