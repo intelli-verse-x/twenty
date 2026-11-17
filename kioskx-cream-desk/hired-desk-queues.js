@@ -1,3 +1,4 @@
+const crewJobs = require('./crew-jobs');
 const reach = require('./reach');
 const companyDesk = require('./desk-company');
 const { BadRequestException } = require('@nestjs/common');
@@ -180,6 +181,9 @@ async function inboxLogin(company, env = process.env, request = fetch) {
     } catch { return unavailable(); }
 }
 class QueueController {
+    async crewJobs(request) { await this.authorize(request); return crewJobs.requestCrew(); }
+    async crewAssign(request,body) { await this.authorize(request); return crewJobs.assign(body,await queueBoard(this.desk)); }
+
     async companyMail(request) { await this.authorize(request); return companyDesk.mailRead(request.query || {}); }
     async companyReply(request, body) { await this.authorize(request); return companyDesk.mailReply(body); }
     async companyEngagement(request) { await this.authorize(request); return companyDesk.engagementState(request.query?.company); }
@@ -207,7 +211,7 @@ class QueueController {
 }
 exports.install = Controller => {
     const common = require('@nestjs/common');
-    for (const [name, route, verb] of [['companyMail','company-mail','Get'],['companyReply','company-reply','Post'],['companyEngagement','company-engagement','Get'],['companySend','company-send','Post'],['inboxLogin','inbox-login','Get'],['queues','queues','Get'],['queueWork','queue-work','Post'],['queueSend','queue-send','Post'],['call','call','Post'],['voiceBridge','voice-bridge','Post']]) {
+    for (const [name, route, verb] of [['crewJobs','crew-jobs','Get'],['crewAssign','crew-assign','Post'],['companyMail','company-mail','Get'],['companyReply','company-reply','Post'],['companyEngagement','company-engagement','Get'],['companySend','company-send','Post'],['inboxLogin','inbox-login','Get'],['queues','queues','Get'],['queueWork','queue-work','Post'],['queueSend','queue-send','Post'],['call','call','Post'],['voiceBridge','voice-bridge','Post']]) {
         Object.defineProperty(Controller.prototype, name, Object.getOwnPropertyDescriptor(QueueController.prototype, name));
         const desc = Object.getOwnPropertyDescriptor(Controller.prototype, name);
         common[verb](route)(Controller.prototype, name, desc);

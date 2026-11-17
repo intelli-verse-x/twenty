@@ -4,7 +4,7 @@ run=lambda args: subprocess.check_output(args,text=True)
 d=json.loads(run(['kubectl','-n','aicart','get','deployment','twenty-server','-o','json']))
 base=next(c['image'] for c in d['spec']['template']['spec']['containers'] if c['name']=='twenty-server')
 (root/'rollout-base-image.txt').write_text(base+'\n')
-entries={'kioskx-desk-queues.js':'front/assets/','index.html':'front/','hired-desk-queues.js':'engine/core-modules/kioskx-hired-desk/','desk-company.js':'engine/core-modules/kioskx-hired-desk/','hired-policy.js':'engine/core-modules/kioskx-hired-desk/'}
+entries={'crew-jobs.js':'engine/core-modules/kioskx-hired-desk/','kioskx-desk-queues.js':'front/assets/','index.html':'front/','hired-desk-queues.js':'engine/core-modules/kioskx-hired-desk/','desk-company.js':'engine/core-modules/kioskx-hired-desk/','hired-policy.js':'engine/core-modules/kioskx-hired-desk/'}
 layer=root/'overlay.tar'
 with tarfile.open(layer,'w') as tar:
  for name,folder in entries.items():
