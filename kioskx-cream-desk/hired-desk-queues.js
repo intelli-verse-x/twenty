@@ -84,6 +84,33 @@ async function queueBoard(desk) {
                 if (!item.id.startsWith('turo:')) item.thread = await reach.reconcile(reach.store(client,schema),item.id,desk);
             }
         } catch { workUnavailable = true; }
+        // Reuse the existing mailbox reader and linked Telnyx notes. Never match
+        // inbound messages to another person's phone or another workspace.
+        if (desk && queues.kiosk) {
+            try {
+                const history = await desk.leads();
+                const queueReplies = await desk.mail?.replies?.(queues.kiosk.rows.map(item=>({id:item.id,email:item.email,sentIds:(item.thread||[]).filter(t=>t.kind==='email'&&t.status==='sent'&&t.key).map(t=>t.key)}))) || [];
+                for (const item of queues.kiosk.rows) {
+                    const messages = [...(history.leads?.find(lead => lead.id === item.id)?.messages || []),...queueReplies.filter(m=>m.leadId===item.id)];
+                    item.thread = [...(item.thread || []), ...messages.map(m => ({
+                        id:m.id, kind:'email', direction:m.direction, status:m.direction === 'inbound' ? 'received' : 'sent', text:m.body, time:m.createdAt
+                    }))].sort((a,b)=>new Date(a.time)-new Date(b.time));
+                }
+                queues.kiosk.inboundMail = !history.unavailable && process.env.KIOSKX_HIRED_MAIL_READ !== 'false' && !!desk.mail?.configured?.();
+            } catch { queues.kiosk.inboundMail = false; }
+            try {
+                const inbound = await client.query(`SELECT t."targetPersonId" AS id, n.id AS "messageId", n."bodyV2Markdown" AS body, n."createdAt" AS time
+                    FROM ${schema}."noteTarget" t JOIN ${schema}.note n ON n.id=t."noteId"
+                    WHERE t."targetPersonId" = ANY($1::uuid[]) AND n.title LIKE 'inbound_sms | %'
+                    AND n."deletedAt" IS NULL AND t."deletedAt" IS NULL ORDER BY n."createdAt"`, [queues.kiosk.rows.map(r=>r.id)]);
+                for (const item of queues.kiosk.rows) {
+                    const messages=inbound.rows.filter(m=>m.id===item.id);
+                    item.thread=[...(item.thread||[]),...messages.map(m=>({id:m.messageId,kind:'sms',direction:'inbound',status:'received',text:String(m.body||'').split('body:\n').slice(1).join('body:\n').replace(/\nat: [^\n]*$/, ''),time:m.time}))].sort((a,b)=>new Date(a.time)-new Date(b.time));
+                }
+                // A pipeline for another brand is not a connected desk inbox.
+                queues.kiosk.inboundSms = inbound.rows.length > 0;
+            } catch { queues.kiosk.inboundSms = false; }
+        }
         return { queues, workUnavailable, ...reach.capabilities() };
     } catch { return { unavailable: true, workUnavailable: true, queues: { turo: fleet() }, mailEnabled: false }; }
     finally { await client.end().catch(() => undefined); }
