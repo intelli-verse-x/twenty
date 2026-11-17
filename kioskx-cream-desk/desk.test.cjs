@@ -51,3 +51,26 @@ test('Signed-in hire sees their session name and Log out below the assistant',as
 test('Log out uses native sign-out, removes desk and shows Welcome back without sending',async()=>{const m=await mount();try{await m.open('cleaning');button(m.d,'Log out').click();await pause();assert.equal(m.w.nativeSignOutCalls,1);assert.equal(m.d.querySelector('.sd-rail'),null);assert.equal(m.d.querySelector('#support-desk'),null);assert.equal(m.d.querySelector('#sd-login h2').textContent,'Welcome back');assert.equal(m.w.localStorage.getItem('tokenPairState'),null);assert.equal(m.calls.filter(c=>c.method==='POST').length,0);}finally{m.close();}});
 test('Rail falls back to the session email local part when name is absent',async()=>{const m=await mount({user:{email:'desk.hire@example.invalid'}});try{assert.equal(m.d.querySelector('.sd-session-name').textContent,'desk.hire');}finally{m.close();}});
 test('Log out keeps the fitted login instead of restoring a 900px panel',async()=>{const m=await mount();try{button(m.d,'Log out').click();await pause();assert.ok(m.d.querySelector('#sd-login'));const css=[...m.d.querySelectorAll('style')].map(s=>s.textContent).join('');assert.doesNotMatch(css,/min-height:\s*900px/);assert.match(css,/#sd-login\{position:fixed;inset:0;height:100dvh;overflow:hidden/);}finally{m.close();}});
+
+
+test('Login and every desk surface use the current Figma navy and cool gray palette',async()=>{
+ const login=await mountLoginFixture(),desk=await mount();
+ try {
+  for(const m of [login,desk]){
+   const css=[...m.d.querySelectorAll('style')].map(s=>s.textContent).join('');
+   assert.doesNotMatch(css,/#f4f0e7|#1e3b38/i);
+   for(const color of ['#f3f5f9','#1f3a5f','#dce2ec','#3b5578','#64748b'])assert.ok(css.includes(color));
+  }
+  assert.equal(login.w.getComputedStyle(login.d.querySelector('#sd-login')).backgroundColor,'rgb(243, 245, 249)');
+  assert.equal(login.w.getComputedStyle(login.d.querySelector('.sl-panel')).backgroundColor,'rgb(31, 58, 95)');
+  for(const q of ['inbox','today','queues','knowledge','insights','integrations','companies','cleaning','cars','jobs','kiosk']){
+   desk.w.kxOpenQueue(q);await pause();
+   assert.equal(desk.w.getComputedStyle(desk.d.querySelector('#support-desk')).backgroundColor,'rgb(243, 245, 249)');
+   assert.equal(desk.w.getComputedStyle(desk.d.querySelector('.sd-rail')).backgroundColor,'rgb(248, 250, 252)');
+  }
+ }finally{login.close();desk.close();}
+});
+
+test('Workspace all-companies navy card keeps its title and count readable',async()=>{const m=await mountLoginFixture();try{await m.submit();const card=m.d.querySelector('.sl-all');assert.equal(m.w.getComputedStyle(card.querySelector('strong')).color,'rgb(255, 255, 255)');assert.equal(m.w.getComputedStyle(card.querySelector('span')).color,'rgb(255, 255, 255)');}finally{m.close();}});
+
+test('Call connection guidance uses the rail and clears when navigating to another request',async()=>{const m=await mount();try{await m.open('cleaning');const panel=m.d.createElement('section');panel.id='kioskx-voice-connect';const native=m.d.createElement('button');native.textContent='Connect Google Voice';panel.append(native);m.d.querySelector('.hired-desk').append(panel);m.w.fetch=async()=>({ok:true,json:async()=>({status:'connect',message:'Connect Google Voice to place this call.'})});button(m.d,'Call their phone').click();await pause();assert.equal(panel.parentElement,m.d.querySelector('.sd-rail'));assert.equal(panel.dataset.deskRequested,'true');assert.equal(panel.querySelector('button'),native);m.w.kxOpenQueue('cars');await pause();assert.equal(panel.dataset.deskRequested,undefined);}finally{m.close();}});
