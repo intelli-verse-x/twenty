@@ -195,6 +195,7 @@ class QueueController {
     async companyMail(request) { await this.authorize(request); return companyDesk.mailRead(request.query || {}); }
     async companyReply(request, body) { await this.authorize(request); return companyDesk.mailReply(body); }
     async companyEngagement(request) { await this.authorize(request); return companyDesk.engagementState(request.query?.company); }
+    async companySite(request, body) { await this.authorize(request); return companyDesk.readSite(body); }
     async companySend(request, body) { await this.authorize(request); return companyDesk.engagementSend(body); }
 
     async inboxLogin(request) { await this.authorize(request); return inboxLogin(request.query?.company); }
@@ -219,7 +220,7 @@ class QueueController {
 }
 exports.install = Controller => {
     const common = require('@nestjs/common');
-    for (const [name, route, verb] of [['applications','applications','Get'],['applicationResume','application-resume','Get'],['voiceSession','voice-session','Get'],['voiceProxy','voice/*','All'],['crewJobs','crew-jobs','Get'],['crewAssign','crew-assign','Post'],['companyMail','company-mail','Get'],['companyReply','company-reply','Post'],['companyEngagement','company-engagement','Get'],['companySend','company-send','Post'],['inboxLogin','inbox-login','Get'],['queues','queues','Get'],['queueWork','queue-work','Post'],['queueSend','queue-send','Post'],['call','call','Post'],['voiceBridge','voice-bridge','Post']]) {
+    for (const [name, route, verb] of [['applications','applications','Get'],['applicationResume','application-resume','Get'],['voiceSession','voice-session','Get'],['voiceProxy','voice/*','All'],['crewJobs','crew-jobs','Get'],['crewAssign','crew-assign','Post'],['companyMail','company-mail','Get'],['companyReply','company-reply','Post'],['companyEngagement','company-engagement','Get'],['companySend','company-send','Post'],['companySite','company-site','Post'],['inboxLogin','inbox-login','Get'],['queues','queues','Get'],['queueWork','queue-work','Post'],['queueSend','queue-send','Post'],['call','call','Post'],['voiceBridge','voice-bridge','Post']]) {
         Object.defineProperty(Controller.prototype, name, Object.getOwnPropertyDescriptor(QueueController.prototype, name));
         const desc = Object.getOwnPropertyDescriptor(Controller.prototype, name);
         common[verb](route)(Controller.prototype, name, desc);

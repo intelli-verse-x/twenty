@@ -3,7 +3,6 @@ const crypto = require('node:crypto');
 const markdown = require('markdown-it')({html:false,linkify:true,breaks:true});
 const {refreshMail} = require('./desk-mail-fetch');
 const reach = require('./reach');
-const {parsePhoneNumberFromString} = require('libphonenumber-js');
 const DESKS = {
  'Kiosk X': {app:'kioskx',mail:'support@kiosk-x.ai',account:1,inbox:101},
  'AniDeeBee': {app:'anideebee',mail:'support@anideebee.com',account:1,inbox:3},
@@ -90,36 +89,4 @@ async function mailReply(input,deps={}) {
   return deps.repo?work(deps.repo):reach.withStore(work);
  }catch{return {status:'unavailable',message:'Reply was not sent. Refresh the thread and try again.'};}
 }
-function engagementState(company,env=process.env) {
- const desk=deskFor(company);
- if(!desk)return {unavailable:true};
- return {app:desk.app,lead:!!desk.app&&desk.app!=='contentx',sms:!!desk.app&&!!env.TELNYX_TOKEN,notifuse:false,missing:desk.app==='contentx'?'ContentX has no app mapping in the live n8n lead workflow; SMS is available, but Notifuse campaigns are not connected.':desk.app?'Notifuse has no verified company campaign send endpoint on this desk.':'AniDeeBee has no app ID in the registry, so outbound automation is unavailable.'};
-}
-function validateLead(input) {
- const desk=deskFor(input?.company);
- if(!desk?.app)return 'This company has no app ID in the registry.';
- if(input.kind==='lead'&&desk.app==='contentx')return 'ContentX has no app mapping in the live n8n lead workflow.';
- if(!['lead','sms'].includes(input.kind))return 'Choose a sending action.';
- if(input.phone){const p=parsePhoneNumberFromString(String(input.phone),'US');if(p?.country!=='US'||!p.isValid())return 'Only US numbers are allowed. India numbers are blocked.';}
- if(input.kind==='sms'&&(!input.phone||!input.smsConsent))return 'A US phone number and consent to SMS are required.';
- if(input.kind==='lead'&&(!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(input.email||'')||!input.emailConsent))return 'Email and consent to email are required.';
- if(input.kind==='sms'&&(typeof input.text!=='string'||!input.text.trim()||input.text.length>1600))return 'Write a text message, up to 1600 characters.';
- if(String(input.name||'').length>200)return 'Name is too long.';
- return '';
-}
-async function engagementSend(input,deps={}) {
- const error=validateLead(input);if(error)return {status:'blocked',message:error};
- const desk=deskFor(input.company),env=deps.env||process.env,request=deps.request||fetch;
- if(input.kind==='sms'&&!env.TELNYX_TOKEN)return {status:'unavailable',message:'Text sending is unavailable.'};
- const payload=input.kind==='sms'?{from:'+18337512480',to:parsePhoneNumberFromString(input.phone,'US').number,text:input.company+': '+input.text}:{app_id:desk.app,name:input.name||'',email:input.email,phone:input.phone?parsePhoneNumberFromString(input.phone,'US').number:'',consent:{email:true,sms:false},source:'support-desk'};
- const work=async repo=>once(repo,`engagement:${desk.app}:${input.kind}`,JSON.stringify(payload),async()=>{
-  const response=await request(input.kind==='sms'?'https://api.telnyx.com/v2/messages':'https://n8n.intelli-verse-x.ai/webhook/hello-app-id',{method:'POST',redirect:'error',headers:{'Content-Type':'application/json',...(input.kind==='sms'?{Authorization:'Bearer '+env.TELNYX_TOKEN}:{})},body:JSON.stringify(payload),signal:AbortSignal.timeout(20000)});
-  if(!response.ok)throw Error('Unconfirmed');const result=await response.json();
-  if(input.kind==='sms')return result.data?.id?{status:'accepted',message:'Text accepted by Telnyx. Delivery is pending.'}:{status:'unknown',message:'Text delivery is unconfirmed. Do not resend.'};
-  return result.ok&&result.twenty?.person_id?{status:'accepted',message:'Lead saved to this company’s CRM through n8n. No email was sent.'}:{status:'unknown',message:'Lead submission is unconfirmed. Do not resend.'};
- });
- try{return deps.repo?await work(deps.repo):await reach.withStore(work);}catch{return {status:'unavailable',message:'Sending is unavailable. Refresh before trying again.'};}
-}
-module.exports={DESKS,mailRead,mailReply,engagementState,engagementSend,validateLead,once};
-
-module.exports.client=client;
+module.exports={DESKS,mailRead,mailReply,once,client,...require('./desk-engagement')({deskFor,once})};
