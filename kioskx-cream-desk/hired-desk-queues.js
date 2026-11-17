@@ -185,6 +185,7 @@ async function inboxLogin(company, env = process.env, request = fetch) {
 }
 class QueueController {
     async calendar(request) { await this.authorize(request); return calendarDesk.list(request.query || {}); }
+    async calendarChange(request, body) { await this.authorize(request); return calendarDesk.change(body || {}); }
     async applications(request) { await this.authorize(request); return applications.read(request.query||{}); }
     async applicationResume(request) { await this.authorize(request); if(request.query?.company!=='AniDeeBee'||!/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(request.query?.id||''))return request.res.status(404).end();try{const r=await applications.stored('/applications/'+request.query.id+'/resume');request.res.setHeader('Content-Type',r.headers.get('content-type'));request.res.setHeader('Content-Disposition',r.headers.get('content-disposition'));return request.res.send(Buffer.from(await r.arrayBuffer()));}catch{return request.res.status(404).end();} }
 
@@ -222,7 +223,7 @@ class QueueController {
 }
 exports.install = Controller => {
     const common = require('@nestjs/common');
-    for (const [name, route, verb] of [['calendar','calendar','Get'],['applications','applications','Get'],['applicationResume','application-resume','Get'],['voiceSession','voice-session','Get'],['voiceProxy','voice/*','All'],['crewJobs','crew-jobs','Get'],['crewAssign','crew-assign','Post'],['companyMail','company-mail','Get'],['companyReply','company-reply','Post'],['companyEngagement','company-engagement','Get'],['companySend','company-send','Post'],['companySite','company-site','Post'],['inboxLogin','inbox-login','Get'],['queues','queues','Get'],['queueWork','queue-work','Post'],['queueSend','queue-send','Post'],['call','call','Post'],['voiceBridge','voice-bridge','Post']]) {
+    for (const [name, route, verb] of [['calendar','calendar','Get'],['calendarChange','calendar','Post'],['applications','applications','Get'],['applicationResume','application-resume','Get'],['voiceSession','voice-session','Get'],['voiceProxy','voice/*','All'],['crewJobs','crew-jobs','Get'],['crewAssign','crew-assign','Post'],['companyMail','company-mail','Get'],['companyReply','company-reply','Post'],['companyEngagement','company-engagement','Get'],['companySend','company-send','Post'],['companySite','company-site','Post'],['inboxLogin','inbox-login','Get'],['queues','queues','Get'],['queueWork','queue-work','Post'],['queueSend','queue-send','Post'],['call','call','Post'],['voiceBridge','voice-bridge','Post']]) {
         Object.defineProperty(Controller.prototype, name, Object.getOwnPropertyDescriptor(QueueController.prototype, name));
         const desc = Object.getOwnPropertyDescriptor(Controller.prototype, name);
         common[verb](route)(Controller.prototype, name, desc);
