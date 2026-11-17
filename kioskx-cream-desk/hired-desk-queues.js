@@ -153,7 +153,32 @@ async function guardedSend(send) {
     if (typeof send !== 'function') return { sent: false, message: 'Mailbox send is unavailable.' };
     return send();
 }
+const INBOX_LOGIN = {
+    'Kiosk X':[1,1],'ToBa Tech':[34,1],'QuizVerse':[1,1],'QuestX':[1,1],
+    'IntelliVerse X':[1,1],'ContentX Studio':[1,1],'Foundrly':[100,133],'AniDeeBee':[1,1]
+};
+async function inboxLogin(company, env = process.env, request = fetch) {
+    const unavailable = () => ({message:'Inbox sign-in is not available.'});
+    if (!Object.hasOwn(INBOX_LOGIN, company || '')) return unavailable();
+    const [account,user] = INBOX_LOGIN[company];
+    if (!env.CHATWOOT_API_URL || !env.CHATWOOT_PLATFORM_TOKEN) return unavailable();
+    try {
+        const base = new URL(env.CHATWOOT_API_URL);
+        if (base.protocol !== 'https:') return unavailable();
+        const response = await request(new URL(`/platform/api/v1/users/${user}/login`, base), {
+            method:'GET', redirect:'error', headers:{api_access_token:env.CHATWOOT_PLATFORM_TOKEN},
+            signal:AbortSignal.timeout(10000)
+        });
+        if (!response.ok) return unavailable();
+        const payload = await response.json();
+        const url = new URL(payload.url);
+        if (url.origin !== base.origin || url.pathname !== '/app/login' || !url.searchParams.get('sso_auth_token')) return unavailable();
+        url.searchParams.set('sso_account_id', String(account));
+        return {url:url.href};
+    } catch { return unavailable(); }
+}
 class QueueController {
+    async inboxLogin(request) { await this.authorize(request); return inboxLogin(request.query?.company); }
     async queues(request) { await this.authorize(request); return queueBoard(this.desk); }
     async queueWork(request, body) { await this.authorize(request); return saveWork(body, this.desk); }
     async queueSend(request, body) {
@@ -175,7 +200,7 @@ class QueueController {
 }
 exports.install = Controller => {
     const common = require('@nestjs/common');
-    for (const [name, route, verb] of [['queues','queues','Get'],['queueWork','queue-work','Post'],['queueSend','queue-send','Post'],['call','call','Post'],['voiceBridge','voice-bridge','Post']]) {
+    for (const [name, route, verb] of [['inboxLogin','inbox-login','Get'],['queues','queues','Get'],['queueWork','queue-work','Post'],['queueSend','queue-send','Post'],['call','call','Post'],['voiceBridge','voice-bridge','Post']]) {
         Object.defineProperty(Controller.prototype, name, Object.getOwnPropertyDescriptor(QueueController.prototype, name));
         const desc = Object.getOwnPropertyDescriptor(Controller.prototype, name);
         common[verb](route)(Controller.prototype, name, desc);
@@ -189,3 +214,4 @@ exports.requestMessage = requestMessage;
 exports.queueBoard = queueBoard;
 exports.saveWork = saveWork;
 exports.guardedSend = guardedSend;
+exports.inboxLogin = inboxLogin;

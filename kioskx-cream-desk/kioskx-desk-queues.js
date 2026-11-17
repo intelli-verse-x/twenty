@@ -67,8 +67,15 @@ function renderEmbed(){
  const frame=el('iframe','sd-embed-frame');
  frame.setAttribute('sandbox','allow-scripts allow-forms allow-same-origin allow-popups');
  if(queue==='inbox'){
-  header.append(el('p','sd-muted','Sign in to Chatwoot here once to read received mail.'));
-  frame.src=desks[company].inbox;frame.title=company+' inbox';
+  frame.title=company+' inbox';
+  const status=el('p','sd-muted','Opening the mailbox…');
+  header.append(status);
+  const asked=company;
+  api('inbox-login?company='+encodeURIComponent(company)).then(result=>{
+   if(!frame.isConnected||company!==asked)return;
+   if(typeof result.url==='string'&&result.url.startsWith('https://inbox.intelli-verse-x.ai/app/login?')&&result.url.includes('sso_auth_token=')){status.remove();frame.src=result.url;}
+   else status.textContent='Inbox sign-in is not available.';
+  }).catch(()=>{if(frame.isConnected)status.textContent='Inbox sign-in is not available.';});
  }else{
   frame.src='https://fonoster.intelli-verse-x.ai/';frame.title=company+' Fonoster desk';
   frame.setAttribute('allow','microphone');
