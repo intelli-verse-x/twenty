@@ -1,3 +1,5 @@
+const applications = require('./desk-applications');
+const studio = require('./desk-voice');
 const crewJobs = require('./crew-jobs');
 const reach = require('./reach');
 const companyDesk = require('./desk-company');
@@ -181,6 +183,12 @@ async function inboxLogin(company, env = process.env, request = fetch) {
     } catch { return unavailable(); }
 }
 class QueueController {
+    async applications(request) { await this.authorize(request); return applications.read(request.query||{}); }
+    async applicationResume(request) { await this.authorize(request); if(request.query?.company!=='AniDeeBee'||!/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(request.query?.id||''))return request.res.status(404).end();try{const r=await applications.stored('/applications/'+request.query.id+'/resume');request.res.setHeader('Content-Type',r.headers.get('content-type'));request.res.setHeader('Content-Disposition',r.headers.get('content-disposition'));return request.res.send(Buffer.from(await r.arrayBuffer()));}catch{return request.res.status(404).end();} }
+
+    async voiceSession(request) { await this.authorize(request); return studio.begin(request); }
+    async voiceProxy(request) { const s=studio.session(request);if(!s)return request.res.status(403).send(studio.failure);request.studioAuthorization=request.headers.authorization;request.headers.authorization=s.authorization;await this.authorize(request);return studio.proxy(request,request.res,s); }
+
     async crewJobs(request) { await this.authorize(request); return crewJobs.requestCrew(); }
     async crewAssign(request,body) { await this.authorize(request); return crewJobs.assign(body,await queueBoard(this.desk)); }
 
@@ -211,12 +219,13 @@ class QueueController {
 }
 exports.install = Controller => {
     const common = require('@nestjs/common');
-    for (const [name, route, verb] of [['crewJobs','crew-jobs','Get'],['crewAssign','crew-assign','Post'],['companyMail','company-mail','Get'],['companyReply','company-reply','Post'],['companyEngagement','company-engagement','Get'],['companySend','company-send','Post'],['inboxLogin','inbox-login','Get'],['queues','queues','Get'],['queueWork','queue-work','Post'],['queueSend','queue-send','Post'],['call','call','Post'],['voiceBridge','voice-bridge','Post']]) {
+    for (const [name, route, verb] of [['applications','applications','Get'],['applicationResume','application-resume','Get'],['voiceSession','voice-session','Get'],['voiceProxy','voice/*','All'],['crewJobs','crew-jobs','Get'],['crewAssign','crew-assign','Post'],['companyMail','company-mail','Get'],['companyReply','company-reply','Post'],['companyEngagement','company-engagement','Get'],['companySend','company-send','Post'],['inboxLogin','inbox-login','Get'],['queues','queues','Get'],['queueWork','queue-work','Post'],['queueSend','queue-send','Post'],['call','call','Post'],['voiceBridge','voice-bridge','Post']]) {
         Object.defineProperty(Controller.prototype, name, Object.getOwnPropertyDescriptor(QueueController.prototype, name));
         const desc = Object.getOwnPropertyDescriptor(Controller.prototype, name);
         common[verb](route)(Controller.prototype, name, desc);
         common.Header('Cache-Control','no-store')(Controller.prototype, name, desc);
         common.Req()(Controller.prototype,name,0);
+        if(['voiceProxy','applicationResume'].includes(name))common.Res()(Controller.prototype,name,1);
         if (verb === 'Post') common.Body()(Controller.prototype,name,1);
     }
 };

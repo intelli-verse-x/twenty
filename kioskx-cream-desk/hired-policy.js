@@ -30,7 +30,7 @@ const hiredRequestAllowed = (identity, request)=>{
         return false;
     }
     return request.method === 'GET' && [
-        '/kioskx-hired-desk/crew-jobs', '/kioskx-hired-desk/company-mail', '/kioskx-hired-desk/company-engagement',
+        '/kioskx-hired-desk/applications', '/kioskx-hired-desk/application-resume', '/kioskx-hired-desk/voice-session', '/kioskx-hired-desk/crew-jobs', '/kioskx-hired-desk/company-mail', '/kioskx-hired-desk/company-engagement',
         '/kioskx-hired-desk/session', '/kioskx-hired-desk/queues',
         '/kioskx-hired-desk/leads', '/kioskx-hired-desk/voice-config'
     ].includes(path) || request.method === 'POST' && [

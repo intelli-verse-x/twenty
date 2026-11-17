@@ -121,3 +121,5 @@ async function engagementSend(input,deps={}) {
  try{return deps.repo?await work(deps.repo):await reach.withStore(work);}catch{return {status:'unavailable',message:'Sending is unavailable. Refresh before trying again.'};}
 }
 module.exports={DESKS,mailRead,mailReply,engagementState,engagementSend,validateLead,once};
+
+module.exports.client=client;
