@@ -187,14 +187,14 @@ function crewOverview(page){
  }catch{if(!c.isConnected)return;c.replaceChildren(el('p','','Worker hours are unavailable.'),button('Refresh hours',load));}};load();
 }
 function crewCard(r){
- const c=card('ASSIGN A HIRED WORKER','Assigning does not send a message. The worker sees this job after mobile verification.');
+ const c=card('ASSIGN A HIRED WORKER','Assigning does not send a message. The worker sees this job after mobile verification.');c.classList.add('sd-crew-card');
  const status=el('div'),form=el('form');form.className='sd-crew-form';const inputs={};
  for(const [key,title,type] of [['phone','Worker mobile (+1)','tel'],['name','Service','text'],['address','Street address','text'],['city','City','text'],['time','Date and time at the job','datetime-local']]){
   const label=el('label','',title),input=el('input');input.type=type;input.required=true;input.name=key;input.setAttribute('aria-label',title);input.style.width='100%';if(key==='name')input.value=r.service||'';label.append(input);form.append(label);inputs[key]=input;
  }
  const role=el('select');role.setAttribute('aria-label','Worker role');for(const [v,t]of(r.queue==='cleaning'?[['cleaner','Cleaner']]:[['driver','Driver'],['rental','Rental helper']])){const o=el('option','',t);o.value=v;role.append(o);}form.append(role);
  const submit=el('button','','Assign job');submit.type='submit';form.append(submit);const feedback=el('p');
- const show=j=>{status.replaceChildren();if(!j){status.append(el('p','','Not assigned'));return;}const h=j.punch_in?Math.max(0,((j.punch_out||Date.now()/1000)-j.punch_in)/3600):0;status.append(el('p','',`${j.phone} — ${j.punch_out?'Punched out':j.punch_in?'On the clock':j.arrived?'At the address':j.travel==='on_the_way'?'On the way':'Not started'}`),el('p','',`${j.name} · ${j.address}, ${j.city} · ${j.time.replace('T',' ')}`),el('p','',`${h.toFixed(2)} hours${j.payout_requested?' · Payout requested — office review needed':''}`));if(j.arrived)status.append(el('p','','Worker marked at the address'));status.append(el('p','','Payroll is not connected. No money moves.'));};
+ const show=j=>{status.replaceChildren();if(!j){status.append(el('p','','Not assigned'));return;}const h=j.punch_in?Math.max(0,((j.punch_out||Date.now()/1000)-j.punch_in)/3600):0;status.append(el('p','',`${j.phone} — ${j.punch_out?'Punched out':j.punch_in?'On the clock':j.arrived?'At the address':j.travel==='on_the_way'?'On the way':'Not started'}`),el('p','',`${j.name} · ${j.address}, ${j.city} · ${j.time.replace('T',' ')}`),el('p','',`${h>0&&h<.01?'<0.01':h.toFixed(2)} hours${j.payout_requested?' · Payout requested — office review needed':''}`));if(j.arrived)status.append(el('p','','Worker marked at the address'));status.append(el('p','','Payroll is not connected. No money moves.'));};
  const load=async()=>{try{const d=await api('crew-jobs');if(!c.isConnected)return;if(d.unavailable)throw Error(d.message);show(d.jobs.find(j=>j.source_id===r.id));}catch{if(!c.isConnected)return;status.textContent='Worker status is unavailable. Refresh to try again.';}};
  form.onsubmit=async e=>{e.preventDefault();submit.disabled=true;feedback.textContent='Saving…';try{const d=await api('crew-assign',{id:r.id,role:role.value,...Object.fromEntries(Object.entries(inputs).map(([k,v])=>[k,v.value]))});feedback.textContent=d.ok?'Assigned. No message was sent.':d.message||'Assignment was not saved.';if(d.ok)await load();}catch{feedback.textContent='Assignment was not saved. Try again.';}finally{submit.disabled=false;}};
  c.append(status,button('Refresh worker status',load),form,feedback);if(unavailable()){for(const input of c.querySelectorAll('input,select,button'))input.disabled=true;status.textContent='Request unavailable. Refresh the queue.';}else load();return c;
@@ -231,6 +231,13 @@ body .hired-desk > :not(#support-desk):not(#sd-workspaces){display:none!importan
 #support-desk .sd-rail h2{font-size:20px;font-weight:800;letter-spacing:-.4px}
 #support-desk .sd-brand{font-size:9px;font-weight:700;color:#a8761f;letter-spacing:1.1px}
 #support-desk .sd-switcher{display:block;background:white;border:1px solid #dce2ec;border-radius:12px;padding:12px;margin-top:26px}
+#support-desk .sd-crew-card button{display:inline-block;background:white;color:#1f3a5f;border:1px solid #dce2ec;border-radius:10px;padding:9px 12px;margin:10px 0;font:600 12px Inter,Arial,sans-serif;cursor:pointer}
+#support-desk .sd-crew-form{display:grid;gap:12px;margin-top:8px}
+#support-desk .sd-crew-form label{display:grid;gap:6px;font-size:12px;color:#64748b}
+#support-desk .sd-crew-form select{width:100%;padding:10px;border:1px solid #dce2ec;border-radius:10px;background:white;color:#1f3a5f;font:inherit}
+#support-desk .sd-crew-form button[type=submit]{justify-self:start;background:#1f3a5f;color:white;margin:0}
+#support-desk .sd-crew-card button:disabled{opacity:.5;cursor:default}
+#support-desk .sd-crew-worker{padding:12px 0;border-bottom:1px solid #dce2ec}
 #support-desk .sd-switch-line{display:flex;align-items:center;margin-top:6px;gap:8px}
 #support-desk .sd-switcher select{min-width:0;width:100%;border:0;background:white;color:#1f3a5f;font:600 12px Inter,Arial,sans-serif}
 #support-desk .sd-dots{display:flex;padding-left:4px}#support-desk .sd-dots i{width:10px;height:10px;border:1px solid white;border-radius:50%;background:#a8761f;margin-left:-4px}#support-desk .sd-dots i:nth-child(2){background:#679892}#support-desk .sd-dots i:nth-child(3){background:#a292bc}
