@@ -278,6 +278,46 @@ describe('WorkflowCronTriggerCronJob', () => {
       );
     });
 
+    it('should skip workspaces missing the workflowAutomatedTrigger table without capturing an exception', async () => {
+      mockCacheStorageService.hashGetValues.mockResolvedValue([]);
+      mockWorkspaceRepository.find.mockResolvedValue([
+        { id: WORKSPACE_1 },
+        { id: WORKSPACE_2 },
+      ]);
+
+      const missingTableError = Object.assign(
+        new Error(
+          'relation "workspace_a3ileet.workflowAutomatedTrigger" does not exist',
+        ),
+        { code: '42P01' },
+      );
+
+      mockCoreDataSource.query
+        .mockRejectedValueOnce(missingTableError)
+        .mockResolvedValueOnce([
+          {
+            id: 'trigger-1',
+            workflowId: 'workflow-1',
+            settings: { pattern: '* * * * *' },
+          },
+        ]);
+
+      await job.handle();
+
+      expect(
+        mockExceptionHandlerService.captureExceptions,
+      ).not.toHaveBeenCalled();
+      expect(mockMessageQueueService.add).toHaveBeenCalledWith(
+        WorkflowTriggerJob.name,
+        {
+          workspaceId: WORKSPACE_2,
+          workflowId: 'workflow-1',
+          payload: {},
+        },
+        { retryLimit: 3 },
+      );
+    });
+
     it('should catch errors per workspace during full scan and continue', async () => {
       mockCacheStorageService.hashGetValues.mockResolvedValue([]);
       mockWorkspaceRepository.find.mockResolvedValue([
