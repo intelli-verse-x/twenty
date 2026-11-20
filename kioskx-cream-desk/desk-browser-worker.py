@@ -3,7 +3,7 @@ Browser sessions are mounted Secrets. Page content is untrusted data, never a ta
 """
 import asyncio,json,os,re
 from pathlib import Path
-from urllib.parse import urlparse
+from urllib.parse import urlparse, parse_qs
 import httpx
 from fastapi import Request
 from fastapi.responses import JSONResponse
@@ -16,6 +16,14 @@ URLS={'indeed':['https://employers.indeed.com/candidates','https://employers.ind
 def allowed(source,url):
     p=urlparse(url)
     return p.scheme=='https' and ((p.hostname or '')==source+'.com' or (p.hostname or '').endswith('.'+source+'.com')) and not p.username and not p.password
+def conversation_url(source,url):
+    if not allowed(source,url): return False
+    p=urlparse(url)
+    if source=='indeed' and p.hostname=='employers.indeed.com' and p.path=='/candidates/view':
+        q=parse_qs(p.query)
+        return set(q)=={'id'} and len(q['id'])==1 and bool(re.fullmatch(r'[a-f0-9]+',q['id'][0]))
+    if source=='turo': return p.hostname=='turo.com' and bool(re.fullmatch(r'/us/en/inbox/messages/thread/[0-9]+',p.path)) and not p.query
+    return bool(re.search(r'message|inbox|conversation',p.path,re.I))
 async def browser(source):
     path=Path('/desk-sessions')/(source+'.json')
     if not path.exists() or not json.loads(path.read_text()).get('cookies'): raise ValueError('Session unavailable')
@@ -61,6 +69,11 @@ async def read(request:Request):
                     label=row.get('name') or row.get('title') or row.get('guest')
                     if label and label not in texts: raise ValueError('Ungrounded record')
                     if row.get('threadUrl') not in links: row.pop('threadUrl',None)
+                    elif source=='indeed':
+                        parsed=urlparse(row['threadUrl']); ids=parse_qs(parsed.query).get('id',[])
+                        if parsed.hostname=='employers.indeed.com' and parsed.path=='/candidates/view' and len(ids)==1 and re.fullmatch(r'[a-f0-9]+',ids[0]):
+                            row['threadUrl']='https://employers.indeed.com/candidates/view?id='+ids[0]
+                        elif not conversation_url(source,row['threadUrl']): row.pop('threadUrl',None)
             if not any(result.get(k) for k in shape): raise ValueError('No account evidence')
             result['browserRead']=True
             return result
@@ -71,7 +84,7 @@ async def read(request:Request):
 async def send(request:Request):
     if not await authorized(request): return JSONResponse({'error':'Unauthorized'},status_code=403)
     body=await request.json();source=body.get('source');url=body.get('threadUrl','');text=body.get('text','')
-    if source not in URLS or not allowed(source,url) or not re.search(r'message|inbox|conversation',url,re.I) or not isinstance(text,str) or not 1<=len(text.strip())<=5000:
+    if source not in URLS or not conversation_url(source,url) or not isinstance(text,str) or not 1<=len(text.strip())<=5000:
         return JSONResponse({'status':'not_sent','message':'This conversation is not connected yet.'},status_code=400)
     b=None;clicked=False
     async with lock:

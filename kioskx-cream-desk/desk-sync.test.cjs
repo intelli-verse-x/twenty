@@ -7,7 +7,7 @@ test('snapshot is the six supplied candidates, one job, four cars and exact trip
  assert.deepEqual(store.candidates(seed.indeed).map(p=>p.label),expected);
  const fleet=store.fleet(seed.turo);assert.equal(fleet.rows.length,4);assert.equal(fleet.rows.filter(r=>r.summary==='No current trip').length,3);assert.match(fleet.rows[0].summary,/Svetozar.*15 Dec 2026 at 3:30 PM/);assert.equal(fleet.rows[0].trip.id,'63056209');assert.equal(fleet.threads.length,14);
  assert.equal(store.candidates(seed.indeed)[1].fields.find(([k])=>k==='Screener answer')[1],'2023 Kia Rio');
- assert.equal(seed.indeed.jobs.length,1);
+ assert.equal(seed.indeed.jobs.length,1);assert.equal(store.candidates(seed.indeed)[2].status,'Matched');
 });
 test('incremental source read preserves candidates and discovers other employer jobs',()=>{
  const newer=indeedSnapshot([{id:'new-mail',label:'Fixture applicant',service:'Warehouse associate',phone:'',email:''}],seed.indeed);
@@ -90,4 +90,55 @@ test('browser is enabled by default; explicit operator pause remains configurabl
  let reads=0;const transport=async()=>{reads++;return {ok:true,json:async()=>({jobs:[]})};};
  await browserDesk.request('read',{source:'indeed'},{},transport);assert.equal(reads,1);
  await assert.rejects(browserDesk.request('read',{source:'indeed'},{DESK_BROWSER_ENABLED:'false'},transport));assert.equal(reads,1);
+});
+
+for(const width of [1440,390,375])test(`signed-in company first paint at ${width} contains exact candidate and trip identities`,async()=>{
+ const m=await mount(width);try{
+  const overview=m.d.querySelector('[aria-label="Indeed and Turo conversations"]');assert.ok(overview);
+  for(const id of ['5fe434c2fb5a','2500e6671d40','95ab7507c35c','cd8dbb747410','f36cc544ea2e','47b26f49a7b9','63056209'])assert.ok(overview.querySelector(`[data-thread-id="${id}"]`));
+  overview.querySelector('[data-thread-id="63056209"]').click();
+  assert.equal(overview.querySelector('.sd-source-thread').dataset.threadUrl,'https://turo.com/us/en/inbox/messages/thread/63056209');
+  assert.equal(m.calls.filter(c=>c.options.method==='POST').length,0);
+  assert.ok(overview.querySelector('textarea'));assert.equal(overview.querySelector('.sd-fleet-send').textContent,'Send');
+ }finally{m.close();}
+});
+test('Svetozar click reaches the exact stored URL and not_sent is never shown as sent',async()=>{
+ const m=await mount(390),db=replyDatabase();let browserCalls=0;
+ const query=db.query;db.query=async(sql,args)=>sql.startsWith('SELECT source')?{rows:[{source:'turo',payload:seed.turo}]}:query(sql,args);
+ m.w.fetch=async(url,options)=>({ok:true,json:async()=>browserDesk.reply(db,JSON.parse(options.body),async(action,body)=>{
+  browserCalls++;assert.equal(action,'send');assert.equal(body.threadUrl,'https://turo.com/us/en/inbox/messages/thread/63056209');return {status:'not_sent',message:'Source sign-in unavailable.'};
+ })});
+ try{
+  m.d.querySelector('[data-thread-id="63056209"]').click();const section=m.d.querySelector('.sd-source-thread');
+  const field=section.querySelector('textarea');field.value='Test transport only';field.dispatchEvent(new m.w.Event('input'));
+  assert.equal(browserCalls,0);section.querySelector('.sd-fleet-send').click();await pause();assert.equal(browserCalls,1);
+  assert.equal(section.querySelector('[data-status]').dataset.status,'not_sent');assert.match(section.textContent,/Not sent/);assert.equal(field.value,'Test transport only');
+  section.querySelector('.sd-fleet-send').click();await pause();assert.equal(browserCalls,1);
+ }finally{m.close();}
+});
+test('known person without a thread URL remains not_sent without a browser call',async()=>{
+ const db=replyDatabase(),query=db.query;db.query=async(sql,args)=>sql.startsWith('SELECT source')?{rows:[{source:'turo',payload:seed.turo}]}:query(sql,args);
+ let calls=0;const result=await browserDesk.reply(db,{...replyInput,id:'snapshot:7'},async()=>{calls++;return {status:'sent'};});
+ assert.equal(result.status,'not_sent');assert.equal(calls,0);
+});
+test('confirmed seed upgrades legacy rows once, retaining other threads and read timestamps',async()=>{
+ let payload=JSON.parse(JSON.stringify(seed.turo));delete payload.evidenceVersion;
+ for(const row of payload.threads){if(row.legacyId){row.id=row.legacyId;delete row.threadUrl;delete row.legacyId;}}
+ const calls=[];const db={query:async(sql,args)=>{calls.push(sql);if(sql.startsWith('SELECT payload'))return {rows:[{payload}]};if(sql.startsWith('UPDATE'))payload=args[2];return {rows:[]};}};
+ await store.seed(db,'workspace_fixture','turo',seed.turo);
+ assert.equal(payload.threads.length,14);assert.equal(payload.threads.find(r=>r.name==='Svetozar').id,'63056209');
+ assert.ok(payload.threads.find(r=>r.name==='Aadil'));
+ const updates=calls.filter(s=>s.startsWith('UPDATE'));assert.equal(updates.length,1);assert.ok(!updates[0].includes('read_at'));
+ await store.seed(db,'workspace_fixture','turo',seed.turo);assert.equal(calls.filter(s=>s.startsWith('UPDATE')).length,1);
+ const refreshed=store.merge(payload,{threads:[{id:'63056209',threadUrl:null,line:'Updated preview'}]});assert.equal(refreshed.threads.find(r=>r.id==='63056209').threadUrl,seed.turo.threads[4].threadUrl);
+});
+test('public desk script contains no private seed records',()=>{
+ const script=fs.readFileSync(__dirname+'/kioskx-desk-queues.js','utf8');
+ for(const name of [...expected,'Svetozar'])assert.ok(!script.includes(name));
+ for(const row of seed.indeed.candidates)assert.ok(!script.includes(row.id));
+});
+test('browser worker accepts confirmed candidate pages and only exact Turo thread paths',()=>{
+ const {execFileSync}=require('node:child_process');
+ const code=`import ast, re\nfrom urllib.parse import urlparse, parse_qs\np=ast.parse(open('kioskx-cream-desk/desk-browser-worker.py').read())\nn=ast.Module(body=[x for x in p.body if isinstance(x,ast.FunctionDef) and x.name in ['allowed','conversation_url']],type_ignores=[])\nexec(compile(n,'worker','exec'))\nassert conversation_url('indeed','https://employers.indeed.com/candidates/view?id=5fe434c2fb5a')\nassert not conversation_url('indeed','https://employers.indeed.com/candidates/view?id=5fe434c2fb5a&listQuery=private')\nassert conversation_url('turo','https://turo.com/us/en/inbox/messages/thread/63056209')\nassert not conversation_url('turo','https://turo.com/us/en/host/vehicles')\nassert not conversation_url('turo','https://turo.com.evil.test/us/en/inbox/messages/thread/63056209')\n`;
+ execFileSync('python3',['-c',code]);
 });

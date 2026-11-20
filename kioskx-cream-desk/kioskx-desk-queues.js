@@ -92,7 +92,7 @@ function resumeLink(r){const link=el('a','sd-resume','Open resume');link.href=r.
 function remember(){const field=host?.querySelector('textarea[aria-label="Reply"],textarea[aria-label="Email"]');if(open&&field)drafts[open]=field.value;}
 function pills(values,selected,onchange){const wrap=el('div','sd-pills');for(const v of values){const b=button(v,()=>onchange(v));b.setAttribute('aria-pressed',String(v===selected));wrap.append(b);}return wrap;}
 function companyPills(){return el('span','sd-selected-company',company);}
-function rowButton(r,label){const b=button('',()=>navigate(queue==='inbox'?'inbox':r.queue,r.id),'sd-row');b.setAttribute('aria-pressed',String(r.id===open));const n=displayName(r),copy=el('span','sd-row-copy'),line=el('span');line.append(el('strong','',n),el('small','',names[r.queue]));copy.append(line,el('span','sd-preview',clean(r.summary||r.message||'Inquiry')));const end=el('span','sd-row-end');end.append(el('time','',time(r.when)),chip(statusOf(r)));if(label)end.append(el('span','',label));b.append(el('span','sd-avatar',n[0].toUpperCase()),copy,end);return b;}
+function rowButton(r,label){const b=button('',()=>navigate(queue==='inbox'?'inbox':r.queue,r.id),'sd-row');b.dataset.threadId=r.browserThreadId||r.id;b.setAttribute('aria-pressed',String(r.id===open));const n=displayName(r),copy=el('span','sd-row-copy'),line=el('span');line.append(el('strong','',n),el('small','',names[r.queue]));copy.append(line,el('span','sd-preview',clean(r.summary||r.message||'Inquiry')));const end=el('span','sd-row-end');end.append(el('time','',time(r.when)),chip(statusOf(r)));if(label)end.append(el('span','',label));b.append(el('span','sd-avatar',n[0].toUpperCase()),copy,end);return b;}
 function card(title,text){const c=el('section','sd-card');c.append(el('h3','',title));if(text)c.append(el('p','',text));return c;}
 function kpis(items){const wrap=el('div','sd-kpis');for(const [label,value,note]of items){const c=card(label);c.prepend(el('strong','sd-number',value));if(note)c.append(el('p','sd-muted',note));wrap.append(c);}return wrap;}
 function sessionName(){
@@ -144,10 +144,11 @@ function renderFleet(page){
  function paint(){list.replaceChildren();for(const row of threads.slice(0,count)){
   const b=button('',()=>{thread.replaceChildren(el('h3','',row.name),el('p','',row.line));
    browserReply(thread,'turo',row);
-  },'sd-row');b.append(el('strong','',row.name),el('span','',row.line));list.append(b);
+  },'sd-row');b.dataset.threadId=row.id;b.append(el('strong','',row.name),el('span','',row.line));list.append(b);
  }if(count<threads.length)list.append(button('More threads',()=>{count+=14;paint();}));}paint();
 }
 function browserReply(parent,source,row){
+ parent.dataset.threadId=row.browserThreadId||row.id;parent.dataset.threadUrl=row.threadUrl||'';
  for(const message of row.messages||[])parent.append(el('p','sd-mail-body',message.text||message.body||''));
  const form=el('form','sd-fleet-reply'),field=el('textarea'),send=el('button','sd-fleet-send','Send'),notice=el('p','sd-muted','Nothing is sent until you press Send.');
  field.setAttribute('aria-label','Reply');field.maxLength=5000;send.type='submit';send.disabled=true;
@@ -155,7 +156,7 @@ function browserReply(parent,source,row){
  field.oninput=()=>{send.disabled=submitted||!field.value.trim();};
  form.append(field,send,notice);parent.append(form);
  form.onsubmit=async event=>{event.preventDefault();if(submitted||!field.value.trim())return;submitted=true;send.disabled=true;field.readOnly=true;notice.textContent='Sending…';
- try{const result=await api('browser-reply',{company:'AniDeeBee',source,id:row.browserThreadId||row.id,text:field.value,requestId});notice.textContent=result.message||(result.status==='sent'?'Sent':'Not sent.');if(result.status==='sent')field.value='';}
+ try{const result=await api('browser-reply',{company:'AniDeeBee',source,id:row.browserThreadId||row.id,text:field.value,requestId});notice.dataset.status=result.status||'unknown';notice.textContent=result.status==='sent'?'Sent':result.status==='not_sent'?'Not sent. '+(result.message||'The source conversation is unavailable in Unified Support.'):'Send could not be confirmed. Do not resend.';if(result.status==='sent')field.value='';}
  catch{notice.textContent='Send could not be confirmed. Do not resend.';}
  };
 }
@@ -236,10 +237,30 @@ function renderCalls(page){
   }
  }).catch(()=>{if(page.isConnected)recent.replaceChildren(el('h3','','RECENT CALLS'),el('p','','Recent calls are unavailable. You can still call a person above.'));});
 }
+function renderSourceOverview(page){
+ const overview=el('section','sd-source-overview');overview.setAttribute('aria-label','Indeed and Turo conversations');
+ const people=el('div','sd-source-people'),thread=el('section','sd-card sd-source-thread');thread.setAttribute('aria-label','Source conversation');
+ people.append(el('h2','','Indeed applications'));
+ sourceNotice(people,data?.queues?.jobs?.snapshot);
+ for(const row of data?.queues?.jobs?.rows||[]){if(row.applicationSource!=='indeed')continue;
+  const b=button('',()=>{thread.replaceChildren(el('h3','',row.label),fields('APPLICATION',row.fields||[]));browserReply(thread,'indeed',row);thread.scrollIntoView?.({block:'nearest'});},'sd-source-person');
+  b.dataset.threadId=row.browserThreadId||row.id;b.append(el('strong','',row.label),el('span','',row.status||'Application'));people.append(b);
+ }
+ people.append(el('h2','','Turo · current trip'));
+ for(const car of data?.queues?.turo?.rows||[]){if(!car.trip)continue;
+  const row=(data.queues.turo.threads||[]).find(r=>r.tripId===car.trip.id||r.id===car.trip.id);
+  const b=button('',()=>{thread.replaceChildren(el('h3','',car.trip.guest),el('p','',car.summary));if(row)browserReply(thread,'turo',row);else thread.append(el('p','','Not sent. Conversation address is not available yet.'));thread.scrollIntoView?.({block:'nearest'});},'sd-source-person');
+  b.dataset.threadId=row?.id||car.trip.id;b.append(el('strong','',car.trip.guest),el('span','',car.summary));people.append(b);
+ }
+ people.append(button('All Turo conversations',()=>navigate('turo')));
+ thread.append(el('p','','Choose a person to read the saved conversation and reply. Nothing is sent until you press Send.'));
+ overview.append(people,thread);page.append(overview);
+}
 function renderEmbed(){
  const asked=company,page=el('section','sd-embed sd-mail'),header=el('header','sd-embed-header');
  header.append(el('h1','',queue==='inbox'?company+' · '+desks[company].mail:'Call · '+company));page.append(header);host.append(page);
  if(queue==='call'){renderCalls(page);return;}
+ if(company==='AniDeeBee')renderSourceOverview(page);
  const layout=el('div','sd-mail-layout'),list=el('section','sd-mail-list'),thread=el('section','sd-mail-thread');list.setAttribute('aria-label','Company conversations');thread.setAttribute('aria-label','Mail thread');layout.append(list,thread);page.append(layout);
  const live=()=>page.isConnected&&company===asked;let pageNo=1,selected=null,threadVersion=0,listBusy=false,pollThread=null;
  const notice=el('p','sd-mail-sync');notice.setAttribute('role','status');notice.hidden=true;header.append(notice);
@@ -463,6 +484,7 @@ body .hired-desk > :not(#support-desk):not(#sd-workspaces){display:none!importan
 @media(max-width:1200px){#support-desk.sd-open{grid-template-columns:180px 280px minmax(330px,1fr)}#support-desk .sd-right{grid-column:3}#support-desk .sd-center{grid-row:1 / span 2}#support-desk .sd-right{display:none}#support-desk .sd-center{padding:20px} }
 @media(max-width:700px){#support-desk,#support-desk.sd-open{position:absolute;min-height:100vh;height:auto;grid-template-columns:1fr;overflow:auto}#support-desk .sd-rail{padding:12px}#support-desk nav{display:flex;flex-wrap:wrap;margin-top:10px}#support-desk .sd-list,#support-desk .sd-center,#support-desk .sd-right{grid-column:1;grid-row:auto;overflow:visible;display:block}#support-desk .sd-center{padding:16px}#support-desk dl{grid-template-columns:120px minmax(0,1fr)}#support-desk .sd-actions{flex-wrap:wrap}}
 
+#support-desk .sd-source-overview{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px;padding:16px;flex-shrink:0}#support-desk .sd-source-person{display:flex;justify-content:space-between;gap:12px;width:100%;text-align:left;margin:4px 0;padding:10px;border:1px solid #dce2ec;border-radius:8px;min-height:44px}#support-desk .sd-source-person strong{flex-shrink:0}#support-desk .sd-source-person span{overflow-wrap:anywhere}#support-desk .sd-mail:has(.sd-source-overview){overflow:auto}#support-desk .sd-mail:has(.sd-source-overview) .sd-mail-layout{min-height:480px;flex-shrink:0}@media(max-width:700px){#support-desk .sd-source-overview{grid-template-columns:1fr;padding:12px}}
 #support-desk .sd-fleet-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,240px),1fr));gap:16px;margin:20px 0}#support-desk .sd-fleet-inbox{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px;margin:16px 0}#support-desk .sd-fleet-inbox .sd-row{flex-wrap:wrap}#support-desk .sd-fleet-send{display:block;margin:12px 0 0 auto;font-weight:700;min-height:44px}#support-desk .sd-source-status{margin:12px 0} @media(max-width:700px){#support-desk .sd-fleet-inbox{grid-template-columns:1fr}}
 #support-desk .sd-call-page{overflow:auto;min-width:0;padding:24px;display:block}
 #support-desk .sd-call-instruction{font-size:16px;line-height:1.6;margin:16px 0 8px}

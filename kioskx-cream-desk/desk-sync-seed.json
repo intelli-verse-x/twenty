@@ -2,25 +2,30 @@
   "indeed": {
     "jobs": [
       {
-        "id": "cargo-van-dallas",
+        "id": "7a21a551421e",
         "title": "Cargo Van Delivery Driver - E-commerce",
-        "city": "Dallas"
+        "city": "Dallas",
+        "legacyId": "cargo-van-dallas"
       }
     ],
     "candidates": [
       {
-        "id": "indeed:snapshot:1",
+        "id": "5fe434c2fb5a",
         "name": "Donald Stephens",
         "city": "Dallas",
-        "status": null,
+        "status": "Interviewing",
         "match": "Matched",
         "interview": "Pending interview",
         "screener": null,
         "role": "Cargo Van Delivery Driver - E-commerce",
-        "jobId": "cargo-van-dallas"
+        "jobId": "7a21a551421e",
+        "legacyId": "indeed:snapshot:1",
+        "threadUrl": "https://employers.indeed.com/candidates/view?id=5fe434c2fb5a",
+        "appliedAt": "2026-11-18",
+        "lastActivity": "You messaged 16 hours ago (read 20 Nov 2026)"
       },
       {
-        "id": "indeed:snapshot:2",
+        "id": "2500e6671d40",
         "name": "Rick Arent",
         "city": "Hurst",
         "status": "Contacting",
@@ -28,10 +33,12 @@
         "interview": null,
         "screener": "2023 Kia Rio",
         "role": "Cargo Van Delivery Driver - E-commerce",
-        "jobId": "cargo-van-dallas"
+        "jobId": "7a21a551421e",
+        "legacyId": "indeed:snapshot:2",
+        "threadUrl": "https://employers.indeed.com/candidates/view?id=2500e6671d40"
       },
       {
-        "id": "indeed:snapshot:3",
+        "id": "95ab7507c35c",
         "name": "Aaron Romero",
         "city": "Grand Prairie",
         "status": null,
@@ -39,42 +46,55 @@
         "interview": null,
         "screener": null,
         "role": "Cargo Van Delivery Driver - E-commerce",
-        "jobId": "cargo-van-dallas"
+        "jobId": "7a21a551421e",
+        "legacyId": "indeed:snapshot:3",
+        "threadUrl": "https://employers.indeed.com/candidates/view?id=95ab7507c35c",
+        "lastActivity": "You messaged 1 day ago (read 20 Nov 2026)"
       },
       {
-        "id": "indeed:snapshot:4",
+        "id": "cd8dbb747410",
         "name": "Anthony Simmons Sr.",
         "city": "Bedford",
-        "status": null,
+        "status": "Interviewing",
         "match": null,
-        "interview": "Pending interview",
+        "interview": "Phone interview awaiting candidate confirmation. Invitation expires 16 February 2027. Interviewer: support@anideebee.com.",
         "screener": null,
         "role": "Cargo Van Delivery Driver - E-commerce",
-        "jobId": "cargo-van-dallas"
+        "jobId": "7a21a551421e",
+        "legacyId": "indeed:snapshot:4",
+        "threadUrl": "https://employers.indeed.com/candidates/view?id=cd8dbb747410",
+        "appliedAt": "2026-11-17"
       },
       {
-        "id": "indeed:snapshot:5",
+        "id": "f36cc544ea2e",
         "name": "Jasmine Black",
         "city": "Grand Prairie",
-        "status": null,
-        "match": "Matched",
-        "interview": null,
-        "screener": null,
-        "role": "Cargo Van Delivery Driver - E-commerce",
-        "jobId": "cargo-van-dallas"
-      },
-      {
-        "id": "indeed:snapshot:6",
-        "name": "Brandon Chandler",
-        "city": "Dallas",
-        "status": null,
+        "status": "Contacting",
         "match": null,
         "interview": null,
+        "screener": "Yes",
+        "role": "Cargo Van Delivery Driver - E-commerce",
+        "jobId": "7a21a551421e",
+        "legacyId": "indeed:snapshot:5",
+        "threadUrl": "https://employers.indeed.com/candidates/view?id=f36cc544ea2e",
+        "appliedAt": "2026-11-17"
+      },
+      {
+        "id": "47b26f49a7b9",
+        "name": "Brandon Chandler",
+        "city": "Dallas",
+        "status": "Interviewing",
+        "match": null,
+        "interview": "Phone interview completed 20 Nov 2026, 5:30 to 6:00 AM IST. Interviewer: support@anideebee.com.",
         "screener": null,
         "role": "Cargo Van Delivery Driver - E-commerce",
-        "jobId": "cargo-van-dallas"
+        "jobId": "7a21a551421e",
+        "legacyId": "indeed:snapshot:6",
+        "threadUrl": "https://employers.indeed.com/candidates/view?id=47b26f49a7b9",
+        "appliedAt": "2026-11-17"
       }
-    ]
+    ],
+    "evidenceVersion": 2
   },
   "turo": {
     "cars": [
@@ -108,34 +128,47 @@
     ],
     "threads": [
       {
-        "id": "snapshot:1",
+        "id": "63110693",
         "name": "Anil",
-        "line": "Cancelled \u00b7 2023 Tesla"
+        "line": "Cancelled \u00b7 2023 Tesla",
+        "legacyId": "snapshot:1",
+        "threadUrl": "https://turo.com/us/en/inbox/messages/thread/63110693"
       },
       {
-        "id": "snapshot:2",
+        "id": "62867182",
         "name": "Weizhuo",
-        "line": "Past \u00b7 2023 Tesla \u00b7 invoice"
+        "line": "Past \u00b7 2023 Tesla \u00b7 invoice",
+        "legacyId": "snapshot:2",
+        "threadUrl": "https://turo.com/us/en/inbox/messages/thread/62867182"
       },
       {
-        "id": "snapshot:3",
+        "id": "63001520",
         "name": "Samarth",
-        "line": "Cancelled \u00b7 2023 Tesla"
+        "line": "Cancelled \u00b7 2023 Tesla",
+        "legacyId": "snapshot:3",
+        "threadUrl": "https://turo.com/us/en/inbox/messages/thread/63001520"
       },
       {
-        "id": "snapshot:4",
+        "id": "63296165",
         "name": "Victor",
-        "line": "Cancelled \u00b7 2023 Tesla"
+        "line": "Cancelled \u00b7 2023 Tesla",
+        "legacyId": "snapshot:4",
+        "threadUrl": "https://turo.com/us/en/inbox/messages/thread/63296165"
       },
       {
-        "id": "snapshot:5",
+        "id": "63056209",
         "name": "Svetozar",
-        "line": "Booked \u00b7 C-Class \u00b7 lockbox line"
+        "line": "Booked \u00b7 C-Class \u00b7 lockbox line",
+        "legacyId": "snapshot:5",
+        "threadUrl": "https://turo.com/us/en/inbox/messages/thread/63056209",
+        "tripId": "63056209"
       },
       {
-        "id": "snapshot:6",
+        "id": "63048849",
         "name": "Dezeray",
-        "line": "Past \u00b7 C-Class"
+        "line": "Past \u00b7 C-Class",
+        "legacyId": "snapshot:6",
+        "threadUrl": "https://turo.com/us/en/inbox/messages/thread/63048849"
       },
       {
         "id": "snapshot:7",
@@ -177,6 +210,7 @@
         "name": "Aadil",
         "line": "Cancelled \u00b7 C-Class"
       }
-    ]
+    ],
+    "evidenceVersion": 2
   }
 }
