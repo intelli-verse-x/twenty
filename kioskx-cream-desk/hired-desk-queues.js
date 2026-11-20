@@ -1,9 +1,12 @@
+const browserDesk = require('./desk-browser');
+const syncStore = require('./desk-sync-store');
 const calendarDesk = require('./desk-calendar');
 const applications = require('./desk-applications');
 const studio = require('./desk-voice');
 const crewJobs = require('./crew-jobs');
 const reach = require('./reach');
 const companyDesk = require('./desk-company');
+const quoDesk = require('./desk-quo');
 const { BadRequestException } = require('@nestjs/common');
 const { Client } = require('pg');
 const QUEUES = { cleaning: 'cleaning_request', cars: 'car_request', jobs: 'job_application' };
@@ -12,7 +15,7 @@ const TURO = [
     ['turo:c300', 'Mercedes C300'], ['turo:tesla-2023', '2023 Tesla Model Y'],
     ['turo:gls450', 'Mercedes GLS450'], ['turo:tesla-2027', '2027 Tesla Model Y'],
 ];
-const fleet = () => ({ rows: TURO.map(([id, label]) => ({ id, label, summary: 'Own reminder', status: 'New', note: '' })) });
+const fleet = syncStore.fleet;
 const text = value => ['string', 'number'].includes(typeof value) ? String(value).replace(/[{}]/g, '').trim() : '';
 function details(raw) {
     let value = raw;
@@ -77,7 +80,12 @@ async function queueBoard(desk) {
         const queues = Object.fromEntries(Object.entries(QUEUES).map(([key, kind]) => [key, {
             rows: found.rows.filter(r => r.kind === kind).map(r => row(r, key)).filter(Boolean), empty: 'No requests in this queue.',
         }]));
-        queues.turo = fleet();
+        try {
+            const snapshots=await syncStore.read(client,schema);
+            queues.jobs.rows.push(...syncStore.candidates(snapshots.indeed));
+            queues.jobs.snapshot={readAt:snapshots.indeed?.readAt,checkedAt:snapshots.indeed?.checkedAt,error:snapshots.indeed?.error,jobs:snapshots.indeed?.jobs||[]};
+            queues.turo=fleet(snapshots.turo);
+        } catch { queues.turo={rows:[],error:'Stored fleet is temporarily unavailable.'}; }
         if(desk) queues.kiosk = {rows:await desk.system(async()=> (await desk.records()).map(r=>({id:r.person.id,label:r.label||'Inquiry',email:r.email,phone:r.phone,country:r.person.phones?.primaryPhoneCountryCode||r.person.phones?.primaryPhoneCallingCode,description:r.inquiry,summary:'Kiosk inquiry',when:r.person.createdAt||null,queue:'kiosk',status:'New',draft:''})))};
         let workUnavailable = false;
         try {
@@ -86,7 +94,7 @@ async function queueBoard(desk) {
             for (const queue of Object.values(queues)) for (const item of queue.rows) {
                 const saved = byId.get(item.id);
                 if (saved) Object.assign(item, { status: saved.status, draft: saved.draft, note: saved.note });
-                if (!item.id.startsWith('turo:')) item.thread = await reach.reconcile(reach.store(client,schema),item.id,desk);
+                if (!item.readOnly && !item.id.startsWith('turo:')) item.thread = await reach.reconcile(reach.store(client,schema),item.id,desk);
             }
         } catch { workUnavailable = true; }
         // Reuse the existing mailbox reader and linked Telnyx notes. Never match
@@ -184,12 +192,15 @@ async function inboxLogin(company, env = process.env, request = fetch) {
     } catch { return unavailable(); }
 }
 class QueueController {
+    async browserReply(request,body) { await this.authorize(request); return browserDesk.withClient(client=>browserDesk.reply(client,body)); }
+
     async calendar(request) { await this.authorize(request); return calendarDesk.list(request.query || {}); }
     async calendarChange(request, body) { await this.authorize(request); return calendarDesk.change(body || {}); }
     async applications(request) { await this.authorize(request); return applications.read(request.query||{}); }
     async applicationResume(request) { await this.authorize(request); if(request.query?.company!=='AniDeeBee'||!/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(request.query?.id||''))return request.res.status(404).end();try{const r=await applications.stored('/applications/'+request.query.id+'/resume');request.res.setHeader('Content-Type',r.headers.get('content-type'));request.res.setHeader('Content-Disposition',r.headers.get('content-disposition'));return request.res.send(Buffer.from(await r.arrayBuffer()));}catch{return request.res.status(404).end();} }
 
     async voiceSession(request) { await this.authorize(request); return studio.begin(request); }
+    async quoBoard(request) { await this.authorize(request); return quoDesk.list(request.query?.company); }
     async voiceProxy(request) { const s=studio.session(request);if(!s)return request.res.status(403).send(studio.failure);request.studioAuthorization=request.headers.authorization;request.headers.authorization=s.authorization;await this.authorize(request);return studio.proxy(request,request.res,s); }
 
     async crewJobs(request) { await this.authorize(request); return crewJobs.requestCrew(); }
@@ -223,7 +234,7 @@ class QueueController {
 }
 exports.install = Controller => {
     const common = require('@nestjs/common');
-    for (const [name, route, verb] of [['calendar','calendar','Get'],['calendarChange','calendar','Post'],['applications','applications','Get'],['applicationResume','application-resume','Get'],['voiceSession','voice-session','Get'],['voiceProxy','voice/*','All'],['crewJobs','crew-jobs','Get'],['crewAssign','crew-assign','Post'],['companyMail','company-mail','Get'],['companyReply','company-reply','Post'],['companyEngagement','company-engagement','Get'],['companySend','company-send','Post'],['companySite','company-site','Post'],['inboxLogin','inbox-login','Get'],['queues','queues','Get'],['queueWork','queue-work','Post'],['queueSend','queue-send','Post'],['call','call','Post'],['voiceBridge','voice-bridge','Post']]) {
+    for (const [name, route, verb] of [['browserReply','browser-reply','Post'],['calendar','calendar','Get'],['calendarChange','calendar','Post'],['applications','applications','Get'],['applicationResume','application-resume','Get'],['voiceSession','voice-session','Get'],['quoBoard','quo','Get'],['voiceProxy','voice/*','All'],['crewJobs','crew-jobs','Get'],['crewAssign','crew-assign','Post'],['companyMail','company-mail','Get'],['companyReply','company-reply','Post'],['companyEngagement','company-engagement','Get'],['companySend','company-send','Post'],['companySite','company-site','Post'],['inboxLogin','inbox-login','Get'],['queues','queues','Get'],['queueWork','queue-work','Post'],['queueSend','queue-send','Post'],['call','call','Post'],['voiceBridge','voice-bridge','Post']]) {
         Object.defineProperty(Controller.prototype, name, Object.getOwnPropertyDescriptor(QueueController.prototype, name));
         const desc = Object.getOwnPropertyDescriptor(Controller.prototype, name);
         common[verb](route)(Controller.prototype, name, desc);
