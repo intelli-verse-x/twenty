@@ -83,10 +83,59 @@ function mailBody(message){
  for(const child of parsed.body.childNodes)copy(child,body);
  return body;
 }
+const callPending=new Set(),callResults=new Map();
+const callCopy=status=>status==='queued'?'Your phone should ring now. Answer it, then their phone rings.':status==='connect'?'Connect the office phone once. Then press Call again.':['refused','disconnected','unavailable','expired','blocked'].includes(status)?'No call was placed. Please try Call again.':'The call outcome is not confirmed. Do not press Call again yet.';
+function showVoiceConnect(){const box=document.querySelector('#kioskx-voice-connect');if(box){box.dataset.deskRequested='true';host.querySelector('.sd-rail').insertBefore(box,host.querySelector('.sd-assistant'));box.hidden=false;}}
+async function callPerson(r){
+ if(callPending.has(r.id))return null;
+ callPending.add(r.id);
+ try{
+  const result=await api('call',{leadId:r.id,requestId:crypto.randomUUID()});
+  if(result.thread){r.thread=[...(r.thread||[]).filter(t=>['inbound','incoming'].includes(t.direction)||t.id&&!t.key),...result.thread].sort((a,b)=>new Date(a.time)-new Date(b.time));const stored=data?.queues?.[r.queue]?.rows.find(x=>x.id===r.id);if(stored)stored.thread=r.thread;}
+  callResults.set(r.id,result.status);return result;
+ }catch(error){callResults.set(r.id,'unknown');throw error;}
+ finally{callPending.delete(r.id);for(const b of host?.querySelectorAll('.sd-person-call')||[]){if(b.dataset.leadId===r.id){b.disabled=false;const feedback=b.parentElement.querySelector('.sd-feedback');feedback.textContent=callCopy(callResults.get(r.id));}}}
+}
+function renderCalls(page){
+ const asked=company;
+ page.classList.add('sd-call-page');
+ page.append(el('p','sd-call-instruction','Press Call. Your phone rings. Answer it, and their phone rings from the office line.'),el('p','sd-muted',"Customers see this company's office number."));
+ const people=el('section','sd-call-people');people.setAttribute('aria-label','People to call');page.append(people);
+ const list=rows().filter(r=>matchesCompany(r)&&statusOf(r)!=='Done'&&!r.readOnly&&r.phone);
+ const failed=!data||data.unavailable||data.workUnavailable||queueKeys.some(k=>matchesCompany({queue:k})&&data.queues?.[k]?.unavailable);
+ if(failed)people.append(el('p','sd-card',data?'People could not be loaded. Refresh to try again.':'Loading people…'));
+ else if(!list.length)people.append(el('p','sd-card','No one to call right now.'));
+ for(const r of list){
+  const row=el('article','sd-card sd-call-person'),copy=el('div','sd-call-person-copy');
+  copy.append(el('h2','',r.queue==='kiosk'?'Kiosk inquiry':displayName(r)),el('p','',clean(r.summary||r.message||names[r.queue]+' request').slice(0,180)));
+  const feedback=el('p','sd-feedback');feedback.setAttribute('role','status');
+  const call=button('Call',async()=>{
+   if(callPending.has(r.id)||call.disabled)return;
+   call.disabled=true;feedback.textContent='Requesting your call…';
+   try{const result=await callPerson(r);if(!result)return;feedback.dataset.status=result.status||'';feedback.textContent=callCopy(result.status);if(result.status==='connect'&&page.isConnected&&company===asked)showVoiceConnect();}
+   catch{feedback.dataset.status='unknown';feedback.textContent=callCopy('unknown');}
+   finally{call.disabled=failed;}
+  },'sd-person-call');
+  call.dataset.leadId=r.id;call.disabled=failed||callPending.has(r.id);if(callResults.has(r.id))feedback.textContent=callCopy(callResults.get(r.id));row.append(copy,call,feedback);people.append(row);
+ }
+ const recent=card('RECENT CALLS','Loading recent calls…');page.append(recent);
+ api('quo?company='+encodeURIComponent(asked)).then(result=>{
+  if(!page.isConnected||company!==asked)return;
+  recent.replaceChildren(el('h3','','RECENT CALLS'));
+  if(result?.connected!==true){recent.append(el('p','','Recent calls are unavailable. You can still call a person above.'));return;}
+  if(!result.calls?.length)recent.append(el('p','','No recent calls.'));
+  for(const item of result.calls||[]){
+   const when=item.at&&!isNaN(new Date(item.at))?new Date(item.at).toLocaleString([],{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}):'';
+   const seconds=Math.max(0,Number(item.duration)||0),status=String(item.status||'').toLowerCase();
+   const outcome=['answered','completed'].includes(status)?'answered':status==='missed'?'missed':['no-answer','no_answer','unanswered','busy','failed','canceled','cancelled'].includes(status)?'no answer':'outcome not confirmed';
+   recent.append(el('p','',`${item.direction==='incoming'?'They called':'You called'} · ${outcome}${seconds?' · '+Math.floor(seconds/60)+'m '+seconds%60+'s':''}${when?' · '+when:''}`));
+  }
+ }).catch(()=>{if(page.isConnected)recent.replaceChildren(el('h3','','RECENT CALLS'),el('p','','Recent calls are unavailable. You can still call a person above.'));});
+}
 function renderEmbed(){
  const asked=company,page=el('section','sd-embed sd-mail'),header=el('header','sd-embed-header');
  header.append(el('h1','',queue==='inbox'?company+' · '+desks[company].mail:'Call · '+company));page.append(header);host.append(page);
- if(queue==='call'){const status=el('p','sd-card','Opening Voice Studio…');page.append(status,el('p','sd-card','Quo key is not stored yet.'));api('voice-session').then(result=>{if(!page.isConnected)return;if(result.url!=='/kioskx-hired-desk/voice/')throw Error();const frame=el('iframe','sd-studio');frame.title='Voice Studio';frame.src=result.url;frame.allow='microphone';frame.style.cssText='width:100%;height:75vh;border:0';status.replaceWith(frame);}).catch(()=>{status.textContent='Voice Studio could not be reached. Call +1 (773) 681-2818.';});return;}
+ if(queue==='call'){renderCalls(page);return;}
  const layout=el('div','sd-mail-layout'),list=el('section','sd-mail-list'),thread=el('section','sd-mail-thread');list.setAttribute('aria-label','Company conversations');thread.setAttribute('aria-label','Mail thread');layout.append(list,thread);page.append(layout);
  const live=()=>page.isConnected&&company===asked;let pageNo=1,selected=null,threadVersion=0,listBusy=false,pollThread=null;
  const notice=el('p','sd-mail-sync');notice.setAttribute('role','status');notice.hidden=true;header.append(notice);
@@ -300,7 +349,7 @@ const saveButton=button('Save private note',async()=>{if(busy)return;busy=true;l
 for(const t of ['Reply','Private note','Email']){const b=button(t,()=>{if(tab==='Private note')note=field.value;else draft=field.value;tab=t;field.value=t==='Private note'?note:draft;field.setAttribute('aria-label',t);saveButton.hidden=t!=='Private note';for(const x of tabs.children)x.setAttribute('aria-selected',String(x===b));lock();});b.setAttribute('role','tab');b.setAttribute('aria-selected',String(t==='Reply'));tabs.append(b);controls.push(b);}tabs.setAttribute('role','tablist');composer.append(tabs,field,saveButton);controls.push(field,saveButton);
 if(r.queue==='cleaning'){const row=el('div','sd-reminder'),label=el('label','','Appointment time'),input=el('input');input.setAttribute('aria-label','Appointment time');input.placeholder='10:30 AM';input.maxLength=80;const b=button('Appointment reminder',()=>{const value=input.value.trim();if(tab==='Private note'){note=field.value;tab='Reply';saveButton.hidden=true;for(const x of tabs.children)x.setAttribute('aria-selected',String(x.textContent==='Reply'));}field.value=value?`You have an appointment tomorrow at ${value}.${r.appointmentDate?' Date on the request: '+r.appointmentDate+'.':''}`:'Add the appointment time, then use Appointment reminder.';draft=field.value;field.setAttribute('aria-label','Reply');lock();});label.append(input);row.append(label,b);composer.append(row,el('p','sd-muted','Fills the reply. Does not send.'));controls.push(input,b);}
 center.append(composer,el('p','sd-instruction','Read the request. Write the reply. Then Email, Call, or Text. Nothing is sent until you press one of those.'));
-const actions=el('div','sd-actions');const action=async kind=>{if(busy||blocked||tab==='Private note')return;busy=true;lock();try{if(kind!=='call')await save({draft:field.value});const result=await api(kind==='call'?'call':'queue-send',kind==='call'?{leadId:r.id,requestId:crypto.randomUUID()}:{id:r.id,kind});feedback.dataset.status=result.status||'';feedback.textContent=safe(result.message);r.thread=result.thread?[...(r.thread||[]).filter(t=>['inbound','incoming'].includes(t.direction)||t.id&&!t.key),...result.thread].sort((a,b)=>new Date(a.time)-new Date(b.time)):r.thread;data.queues[r.queue].rows.find(x=>x.id===r.id).thread=r.thread;paintThread();if(result.status==='connect'){const box=document.querySelector('#kioskx-voice-connect');if(box){box.dataset.deskRequested='true';host.querySelector('.sd-rail').insertBefore(box,host.querySelector('.sd-assistant'));box.hidden=false;}}}catch{feedback.dataset.status='error';feedback.textContent='Outcome is unconfirmed. Refresh before trying again.';}finally{busy=false;lock();}};
+const actions=el('div','sd-actions');const action=async kind=>{if(busy||blocked||tab==='Private note')return;busy=true;lock();try{if(kind!=='call')await save({draft:field.value});const result=kind==='call'?await callPerson(r):await api('queue-send',{id:r.id,kind});if(!result)return;feedback.dataset.status=result.status||'';feedback.textContent=kind==='call'?callCopy(result.status):safe(result.message);r.thread=result.thread?[...(r.thread||[]).filter(t=>['inbound','incoming'].includes(t.direction)||t.id&&!t.key),...result.thread].sort((a,b)=>new Date(a.time)-new Date(b.time)):r.thread;data.queues[r.queue].rows.find(x=>x.id===r.id).thread=r.thread;paintThread();if(result.status==='connect')showVoiceConnect();}catch{feedback.dataset.status='error';feedback.textContent=kind==='call'?callCopy('unknown'):'Outcome is unconfirmed. Refresh before trying again.';}finally{busy=false;lock();}};
 const send=button(privateKiosk?'Email as KioskX':'Email as AniDeeBee',()=>action('email'));const call=button('Call their phone',()=>action('call'));const sms=button('Text their phone',()=>action('sms'));actions.append(send,call,sms);center.append(actions,el('p','sd-muted sd-action-help','Email sends the reply above. Call rings their phone from the office Google Voice after this browser is connected. Text sends the reply to a US phone. A number in India is blocked.'),feedback);
 function lock(){for(const c of controls)c.disabled=blocked||busy;send.disabled=blocked||busy||tab==='Private note'||!data.mailEnabled;call.disabled=blocked||busy||tab==='Private note';sms.disabled=blocked||busy||tab==='Private note'||!data.smsEnabled;}lock();if(blocked){feedback.dataset.status='error';feedback.textContent='This queue is unavailable. Try refreshing.';}
 const side=el('aside','sd-right');if(queue==='inbox')side.append(card('AI ASSIST',safe(r.message||r.summary||'No message was submitted.')));const suggested=card('SUGGESTED ARTICLES'),idx=r.queue==='cleaning'?0:r.queue==='cars'?1:r.queue==='kiosk'?3:2,insertFeedback=el('p','sd-feedback');suggested.append(el('p','',articles[idx][0]));const insert=button('Insert link in reply',()=>insertArticle(idx,insertFeedback));insert.disabled=blocked||busy;suggested.append(insert,insertFeedback);controls.push(insert);if(queue==='inbox')side.append(suggested);side.append(fields('CONTACT',[['Email',privateKiosk?'Hidden':r.email||'No email'],['Phone',privateKiosk?'Hidden':r.phone||'No phone'],['Queue',names[r.queue]],['Received',r.when?new Date(r.when).toLocaleString():'Not recorded']],'sd-contact'));const ticket=el('section','sd-card sd-ticket');ticket.append(el('h3','','TICKET (ZAMMAD'));if(r.ticket&&typeof r.ticket==='object'){ticket.append(fields('',Object.entries(r.ticket).filter(([k,v])=>['title','state','priority','group'].includes(k)&&typeof v==='string').map(([k,v])=>[k,safe(v)])));}else ticket.append(el('p','','No ticket yet.'));side.append(ticket);host.append(center,side);
@@ -310,6 +359,16 @@ body .hired-desk > :not(#support-desk):not(#sd-workspaces){display:none!importan
 @media(max-width:1200px){#support-desk.sd-open{grid-template-columns:180px 280px minmax(330px,1fr)}#support-desk .sd-right{grid-column:3}#support-desk .sd-center{grid-row:1 / span 2}#support-desk .sd-right{display:none}#support-desk .sd-center{padding:20px} }
 @media(max-width:700px){#support-desk,#support-desk.sd-open{position:absolute;min-height:100vh;height:auto;grid-template-columns:1fr;overflow:auto}#support-desk .sd-rail{padding:12px}#support-desk nav{display:flex;flex-wrap:wrap;margin-top:10px}#support-desk .sd-list,#support-desk .sd-center,#support-desk .sd-right{grid-column:1;grid-row:auto;overflow:visible;display:block}#support-desk .sd-center{padding:16px}#support-desk dl{grid-template-columns:120px minmax(0,1fr)}#support-desk .sd-actions{flex-wrap:wrap}}
 
+#support-desk .sd-call-page{overflow:auto;min-width:0;padding:24px;display:block}
+#support-desk .sd-call-instruction{font-size:16px;line-height:1.6;margin:16px 0 8px}
+#support-desk .sd-call-people{margin:20px 0}
+#support-desk .sd-call-person{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px 16px;margin-bottom:12px;align-items:center}
+#support-desk .sd-call-person-copy{min-width:0;overflow-wrap:anywhere}
+#support-desk .sd-call-person h2{font-size:18px;margin:0 0 6px}
+#support-desk .sd-call-person .sd-feedback{grid-column:1/-1;margin:0;overflow-wrap:anywhere}
+#support-desk .sd-person-call{background:#1f3a5f;color:white;border:0;border-radius:10px;min-height:44px;min-width:70px;padding:10px 18px;cursor:pointer}
+#support-desk .sd-person-call:disabled{opacity:.6;cursor:wait}
+@media(max-width:700px){#support-desk .sd-call-page{padding:16px}#support-desk .sd-call-person{padding:14px}}
 /* Support Desk: shared cream chrome and responsive work areas. */
 #support-desk{grid-template-columns:232px minmax(0,1fr);color:#1f3a5f}
 #support-desk.sd-open{grid-template-columns:232px 360px minmax(340px,1fr) 280px}
@@ -531,6 +590,7 @@ body .hired-desk #kioskx-voice-connect a{color:#2f5f8a}
 #support-desk .sd-mail-message.sent{background:#e8eef6}
 #support-desk .sd-mail-body{white-space:normal;overflow-wrap:anywhere;line-height:1.6;background:#fff;color:#242424;padding:16px;border-radius:8px;overflow-x:auto}#support-desk .sd-mail-body img{max-width:100%;height:auto}#support-desk .sd-mail-body table{max-width:100%;border-collapse:collapse;border:0}#support-desk .sd-mail-body td,#support-desk .sd-mail-body th{padding:4px;border:0}#support-desk .sd-mail-body a{color:#245a88;text-decoration:underline}#support-desk .sd-mail-body p{white-space:normal}#support-desk .sd-mail-body pre{white-space:pre-wrap}
 #support-desk .sd-mail-reply textarea{display:block;width:100%;min-height:110px;margin:8px 0}
+#support-desk .sd-mail-reply > button[type=submit]{display:block;margin-left:auto;font-weight:700;min-height:44px}
 #support-desk .sd-mail-paging{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 @media(max-width:760px){#support-desk .sd-mail-layout{display:flex;flex-direction:column;overflow:auto}#support-desk .sd-mail-list{flex:0 0 200px;min-height:0;max-height:200px}#support-desk .sd-mail-thread{flex:0 0 540px;min-height:540px;padding:12px}#support-desk .sd-mail-message{padding:8px}#support-desk .sd-mail-body{padding:8px}}
 #support-desk .sd-embed{position:absolute;left:232px;right:0;top:0;bottom:0;display:flex;flex-direction:column;min-width:0;background:#f3f5f9;overflow:hidden;z-index:1}
@@ -543,49 +603,48 @@ window.kxQueueCounts=null;window.kxOpenQueue=k=>navigate(names[k]?k:'inbox');
 function hashArticle(){const m=location.hash.match(/^#desk-article=(\d+)$/);if(m&&articles[Number(m[1])]){article=Number(m[1]);navigate('knowledge');}}window.addEventListener('hashchange',hashArticle);
 function start(){if(!document.documentElement)return;const desk=document.querySelector('main.hired-desk');if(host&&!host.isConnected)host=null;if(!desk||host)return;host=el('div');host.id='support-desk';desk.append(host);hashArticle();render();api('queues').then(d=>{data=d;window.kxQueueCounts=Object.fromEntries(Object.keys(names).map(k=>[k,rows().filter(r=>r.queue===k).length]));render();chooseWorkspace();}).catch(()=>{data={unavailable:true};window.kxQueueCounts={};render();});}
 new MutationObserver(start).observe(document.documentElement,{childList:true,subtree:true});start();
-// The visible form drives Twenty's own form; Twenty alone signs in, stores and
-// refreshes its token pair, checks hired access, and mounts main.hired-desk.
-let login=null,loginPending=false,passwordSubmitted=false,loginTimer=null,justSignedIn=false;
+// Twenty authenticates directly, even before its native form has mounted.
+let login=null,loginPending=false,loginTimer=null;
+let justSignedIn=sessionStorage.getItem('sd-choose-workspace')==='1';
 const authPath=()=>location.pathname==='/'||location.pathname==='/welcome'||location.pathname.startsWith('/welcome/');
-const nativeForm=()=>[...document.querySelectorAll('form')].find(f=>!f.closest('#sd-login')&&f.querySelector('input[autocomplete="email"],input[placeholder="Email"]'));
 const nativeControl=re=>[...document.querySelectorAll('button,a')].find(e=>!e.closest('#sd-login')&&re.test(e.textContent.trim()));
-function nativeValue(input,value){if(!input)return;Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,value);input.dispatchEvent(new Event('input',{bubbles:true}));input.dispatchEvent(new Event('change',{bubbles:true}));}
 function loginFailure(message='Email or password is incorrect. Try again or reset your password.'){
- if(!login)return;loginPending=false;passwordSubmitted=false;clearTimeout(loginTimer);
+ if(!login)return;loginPending=false;clearTimeout(loginTimer);
  const password=login.querySelector('[name=password]');password.value='';password.type='password';login.querySelector('[data-show]').setAttribute('aria-pressed','false');
- nativeValue(nativeForm()?.querySelector('input[placeholder="Password"],input[type=password]'),'');
  const error=login.querySelector('[role=alert]');error.textContent=message;error.hidden=false;login.querySelector('[type=submit]').disabled=false;
 }
-// Watch only auth results, without reading/storing credentials or token values.
-const crmFetch=window.fetch;
-window.fetch=async function(...args){
- let authRequest=false;
- try{const url=typeof args[0]==='string'?args[0]:args[0]?.url;const operation=typeof args[1]?.body==='string'?JSON.parse(args[1].body).operationName:'';
-  authRequest=!!url&&new URL(url,location.origin).pathname==='/metadata'&&/^(CheckUserExists|SignIn|GetLoginTokenFromCredentials|GetAuthTokensFromLoginToken)$/i.test(operation);
- }catch{}
- let response;try{response=await crmFetch.apply(this,args);}catch(error){if(loginPending&&authRequest)loginFailure('Sign-in is unavailable. Please try again.');throw error;}
- if(loginPending&&authRequest){try{
-   const result=await response.clone().json();
-   if(result.data?.checkUserExists?.exists===false){
-    loginFailure();
-    // Keep an unknown hire on sign-in; never advance the native form to sign-up.
-    return new Response(JSON.stringify({errors:[{message:'Email or password is incorrect.'}]}),{status:200,headers:{'Content-Type':'application/json'}});
-   }
-   if(result.errors?.length)loginFailure();
- }catch{/* Native CRM handles non-JSON responses. */}}
- return response;
-};
-
-function advanceNativeLogin(){
- if(!loginPending||passwordSubmitted)return;
- const form=nativeForm(),password=form?.querySelector('input[placeholder="Password"],input[type=password]');
- if(!password)return;
- const submit=form.querySelector('[type=submit]');
- if(!submit||!/sign in/i.test(submit.textContent)){if(/sign up/i.test(submit?.textContent||''))loginFailure();return;}
- passwordSubmitted=true;
- nativeValue(form.querySelector('input[autocomplete=email],input[placeholder="Email"]'),login.querySelector('[name=email]').value.trim());
- nativeValue(password,login.querySelector('[name=password]').value);
- let checks=0;const finish=()=>{if(!loginPending)return;if(submit.disabled){if(++checks<40){setTimeout(finish,50);return;}loginFailure();return;}form.requestSubmit();};setTimeout(finish,50);
+async function signIn(form){
+ const controller=new AbortController();
+ loginTimer=setTimeout(()=>controller.abort(),20000);
+ const metadata=async(operationName,query,variables)=>{
+  const response=await fetch('/metadata',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},signal:controller.signal,body:JSON.stringify({operationName,query,variables})});
+  if(!response.ok)throw Error('unavailable');
+  const result=await response.json();
+  if(result.errors?.length)throw Error('credentials');
+  return result.data;
+ };
+ try{
+  const email=form.querySelector('[name=email]').value.trim(),origin=location.origin;
+  const user=await metadata('CheckUserExists','query CheckUserExists($email: String!) { checkUserExists(email: $email) { exists } }',{email});
+  if(user?.checkUserExists?.exists!==true)throw Error('credentials');
+  const credentials=await metadata('GetLoginTokenFromCredentials','mutation GetLoginTokenFromCredentials($email: String!, $password: String!, $origin: String!) { getLoginTokenFromCredentials(email: $email, password: $password, origin: $origin) { loginToken { token } } }',{email,password:form.querySelector('[name=password]').value,origin});
+  const loginToken=credentials?.getLoginTokenFromCredentials?.loginToken?.token;
+  if(typeof loginToken!=='string'||!loginToken)throw Error('credentials');
+  const result=await metadata('getAuthTokensFromLoginToken','mutation getAuthTokensFromLoginToken($loginToken: String!, $origin: String!) { getAuthTokensFromLoginToken(loginToken: $loginToken, origin: $origin) { tokens { __typename accessOrWorkspaceAgnosticToken { __typename token expiresAt } refreshToken { __typename token expiresAt } } } }',{loginToken,origin});
+  const pair=result?.getAuthTokensFromLoginToken?.tokens;
+  if(!pair||!['accessOrWorkspaceAgnosticToken','refreshToken'].every(k=>typeof pair[k]?.token==='string'&&pair[k].token))throw Error('credentials');
+  if(controller.signal.aborted)throw Error('unavailable');
+  // Store only the server-issued pair in the shape Twenty validates on boot.
+  localStorage.setItem('tokenPairState',JSON.stringify(pair));
+  if(form.querySelector('[type=checkbox]').checked){localStorage.removeItem('sd-session-only');sessionStorage.removeItem('sd-session-active');}
+  else{localStorage.setItem('sd-session-only','1');sessionStorage.setItem('sd-session-active','1');}
+  localStorage.setItem('sd-session-email',email);sessionStorage.setItem('sd-choose-workspace','1');
+  form.querySelector('[name=password]').value='';clearTimeout(loginTimer);
+  location.replace('/welcome');
+ }catch(error){
+  localStorage.removeItem('tokenPairState');sessionStorage.removeItem('sd-choose-workspace');
+  loginFailure(error.message==='credentials'?undefined:'Sign-in is unavailable. Please try again.');
+ }
 }
 function brandMark(){const b=el('div','sl-brand');b.innerHTML='<span class="sl-mark" aria-hidden="true">∪<i></i></span><span><strong>Unified Support</strong><small>CUSTOMER SUPPORT</small></span>';return b;}
 function mountLogin(){
@@ -602,13 +661,7 @@ function mountLogin(){
  const explain=t=>{info.hidden=false;info.textContent=t;};
  const forgot=button('Forgot password?',()=>{const reset=nativeControl(/^Forgot (your )?password\?$/i);if(reset){login.remove();login=null;document.body.classList.remove('sd-auth');authDelegated=true;reset.click();}else explain('Password reset is not available on this desk. Ask your company admin.');});form.querySelector('.sl-password-label').append(forgot);
  const submit=button('Sign in');submit.type='submit';submit.className='sl-submit';form.append(submit);
- form.onsubmit=e=>{e.preventDefault();if(loginPending)return;const native=nativeForm();if(!native){explain('Sign-in is still loading. Please try again.');return;}error.hidden=true;info.hidden=true;loginPending=true;passwordSubmitted=false;submit.disabled=true;
-  // Scope the existing CRM session to this browser tab when persistence is off.
-  if(form.querySelector('[type=checkbox]').checked){localStorage.removeItem('sd-session-only');}else{localStorage.setItem('sd-session-only','1');sessionStorage.setItem('sd-session-active','1');}
-  loginTimer=setTimeout(()=>loginFailure('Sign-in did not finish. Please try again.'),20000);
-  nativeValue(native.querySelector('input[autocomplete=email],input[placeholder="Email"]'),form.querySelector('[name=email]').value.trim());
-  if(native.querySelector('input[placeholder="Password"],input[type=password]'))advanceNativeLogin();else setTimeout(()=>{if(loginPending)native.requestSubmit();},0);
- };
+ form.onsubmit=e=>{e.preventDefault();if(loginPending)return;error.hidden=true;info.hidden=true;loginPending=true;submit.disabled=true;signIn(form);};
  card.append(form,el('div','sl-or','or'));const google=button('Continue with Google',()=>{const native=nativeControl(/^(Continue|Sign in) with Google$/i);if(native)native.click();else explain('Google sign-in is not connected on this desk.');},'sl-google');card.append(google,info,el('p','sl-invite','No account? Ask your company admin for an invite.'));
  const legal=el('div','sl-legal');for(const [name,re] of [['Privacy',/Privacy (Policy)?/i],['Terms',/Terms (of Service)?/i]]){if(legal.childNodes.length)legal.append(document.createTextNode(' · '));const a=button(name,()=>{const link=nativeControl(re);if(link)link.click();});legal.append(a);}card.append(legal);side.append(card);login.append(brand,side);document.body.append(login);document.body.classList.add('sd-auth');
 }
@@ -619,11 +672,11 @@ function syncLogin(){
  if(authDelegated&&!authPath())delegatedAway=true;
  if(authDelegated&&delegatedAway&&authPath()){authDelegated=false;delegatedAway=false;}
  const desk=document.querySelector('main.hired-desk');
- if(!desk&&host){host.remove();host=null;data=null;}if(desk){if(login){justSignedIn=loginPending;if(loginPending)localStorage.setItem('sd-session-email',login.querySelector('[name=email]').value.trim());login.remove();login=null;loginPending=false;clearTimeout(loginTimer);}document.body.classList.remove('sd-auth');return;}
- if(!authDelegated)mountLogin();advanceNativeLogin();
+ if(!desk&&host){host.remove();host=null;data=null;}if(desk){if(login){justSignedIn=justSignedIn||loginPending;if(loginPending)localStorage.setItem('sd-session-email',login.querySelector('[name=email]').value.trim());login.remove();login=null;loginPending=false;clearTimeout(loginTimer);}document.body.classList.remove('sd-auth');return;}
+ if(!authDelegated)mountLogin();
 }
 function chooseWorkspace(){
- if(!justSignedIn||!data||data.unavailable)return;justSignedIn=false;
+ if(!justSignedIn||!data||data.unavailable)return;justSignedIn=false;sessionStorage.removeItem('sd-choose-workspace');
  const connected=companies;
  const chooser=el('section','sl-workspaces');chooser.id='sd-workspaces';chooser.append(brandMark(),el('h1','','Choose a workspace'),el('p','','Choose a company desk.'));
  host.inert=true;chooser.setAttribute('role','dialog');chooser.setAttribute('aria-modal','true');chooser.setAttribute('aria-label','Choose a workspace');
@@ -636,7 +689,7 @@ html:has(body.sd-auth),html:has(#sd-workspaces),body:has(#sd-workspaces){overflo
 #sd-login * ,#sd-workspaces *{box-sizing:border-box}#sd-login{position:fixed;inset:0;height:100dvh;overflow:hidden;display:grid;grid-template-columns:620px minmax(0,1fr);z-index:2000}
 #sd-login button,#sd-workspaces button{font:inherit;cursor:pointer}#sd-login button:disabled{cursor:wait;opacity:.65}#sd-login [hidden]{display:none!important}
 .sl-panel{background:#1f3a5f;color:white;padding:56px;display:flex;flex-direction:column;min-height:0}.sl-brand{display:flex;align-items:center;gap:12px}.sl-brand strong{font-size:20px;letter-spacing:-.5px}.sl-brand small{display:block;font-size:10px;font-weight:600;letter-spacing:1px}.sl-mark{position:relative;width:40px;height:40px;background:white;color:#1f3a5f;border-radius:10px;text-align:center;font:bold 36px/36px Arial}.sl-mark i{position:absolute;width:6px;height:6px;background:#1f3a5f;border-radius:50%;left:18px;top:12px}
-.sl-story{margin-top:auto;padding-top:70px}.sl-story h1{font-size:40px;line-height:1.15;letter-spacing:-1px;max-width:420px;margin:0 0 22px}.sl-story p{font-size:16px;line-height:24px;color:#c9d6e8;margin:0 0 20px}.sl-pills{display:flex;gap:8px}.sl-pills span{padding:6px 12px;border-radius:20px;background:#ffffff20;font-size:12px;font-weight:600}.sl-story ul{padding:0;margin:54px 0 0;list-style:none;font-size:13px}.sl-story li{position:relative;padding-left:28px;margin-top:18px}.sl-story li:before{content:'✓';position:absolute;left:0;border-radius:50%;background:#2f7a4f;width:18px;height:18px;text-align:center;font-size:11px}
+.sl-story{margin-top:auto;padding-top:70px}.sl-story h1{font-size:40px;line-height:1.15;letter-spacing:-1px;max-width:420px;margin:0 0 22px}.sl-story p{font-size:16px;line-height:24px;color:#c9d6e8;margin:0 0 20px}.sl-pills{display:flex;flex-wrap:wrap;gap:8px}.sl-pills span{padding:6px 12px;border-radius:20px;background:#ffffff20;font-size:12px;font-weight:600}.sl-story ul{padding:0;margin:54px 0 0;list-style:none;font-size:13px}.sl-story li{position:relative;padding-left:28px;margin-top:18px}.sl-story li:before{content:'✓';position:absolute;left:0;border-radius:50%;background:#2f7a4f;width:18px;height:18px;text-align:center;font-size:11px}
 .sl-side{display:flex;align-items:center;justify-content:center;padding:36px}.sl-card{background:#fff;border:1px solid #dce2ec;border-radius:20px;padding:32px 36px 34px;width:440px;max-width:100%}.sl-card h2{font-size:28px;letter-spacing:-1px;line-height:36px;margin:0 0 12px}.sl-subtitle{margin:0 0 12px;color:#64748b}.sl-card label{display:block;font-size:12px;font-weight:600}.sl-card input:not([type=checkbox]){width:100%;height:45px;border:1px solid #dce2ec;border-radius:10px;background:white;padding:12px 14px;font:14px Inter,Arial,sans-serif;color:#1f3a5f;margin-top:4px}.sl-card input::placeholder{color:#64748b}.sl-password-label{display:flex;align-items:center;justify-content:space-between;margin-top:14px}.sl-password-label button,.sl-password button,.sl-legal button{border:0;background:none;padding:0;color:#2f5f8a;font-size:12px}.sl-password{position:relative}.sl-password input{padding-right:66px!important}.sl-password button{position:absolute;right:15px;top:17px}.sl-remember{display:flex!important;align-items:center;gap:8px;font-size:13px!important;font-weight:400!important;margin:16px 0}.sl-remember input{accent-color:#1f3a5f;width:18px;height:18px;margin:0}.sl-submit,.sl-google{width:100%;height:44px;border-radius:12px;border:1px solid #dce2ec;font-weight:600!important}.sl-submit{background:#1f3a5f;color:white;border:0}.sl-google{background:white;color:#1f3a5f}.sl-or{display:flex;align-items:center;gap:10px;color:#64748b;font-size:12px;margin:16px 0}.sl-or:before,.sl-or:after{content:'';height:1px;background:#dce2ec;flex:1}.sl-invite{text-align:center;font-size:12px;color:#64748b;margin:14px 0 0}.sl-legal{text-align:center;font-size:12px}.sl-error{background:#f6ddd8;border:1px solid #a63d2f;border-radius:8px;padding:12px;color:#a63d2f;font-size:13px;margin:20px 0}.sl-info{font-size:13px}.sl-workspaces{position:fixed;inset:0;z-index:2100;display:flex;align-items:center;justify-content:center;flex-direction:column;padding:36px;overflow:auto}.sl-workspaces h1{font-size:32px;margin:24px 0 8px}.sl-workspaces>.sl-brand .sl-mark{background:#1f3a5f;color:white}.sl-workspaces>.sl-brand .sl-mark i{background:white}.sl-all{position:relative;text-align:left;width:760px;max-width:100%;background:white;border:1px solid #dce2ec;border-radius:12px;padding:20px;margin:24px 0 16px}.sl-all strong,.sl-all span{display:block}.sl-all b{position:absolute;right:24px;top:30px}.sl-workspace-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:14px;max-width:760px;width:100%}.sl-workspace-grid button{border:1px solid #dce2ec;border-radius:12px;background:white;color:#1f3a5f;text-align:left;padding:20px}.sl-workspace-grid strong,.sl-workspace-grid small{display:block;margin:6px 0}.sl-workspace-grid span{display:block;font-size:12px}.sl-initial{font-size:20px!important;margin-bottom:16px;width:36px;height:36px;background:#e3e9f2;border-radius:8px;text-align:center;line-height:36px}.sl-workspace-grid .sl-role{display:inline-block;border-radius:12px;background:#e3e9f2;padding:2px 8px}.sl-open-count{margin-top:5px}
 @media(max-width:1100px){#sd-login{grid-template-columns:46% 54%}.sl-panel{padding:36px}.sl-side{padding:24px}.sl-card{padding:28px}.sl-story h1{font-size:36px}}@media(min-width:700px) and (max-height:800px){.sl-panel{padding:32px}.sl-story{padding-top:28px}.sl-story h1{font-size:34px}.sl-story ul{margin-top:28px}.sl-side{padding:20px}.sl-card{padding:24px 28px}}@media(max-width:699px){html:has(body.sd-auth),body.sd-auth{overflow:auto!important}#sd-login{position:absolute;display:block;height:auto;min-height:100dvh;overflow:visible}.sl-panel{min-height:0;padding:28px 24px}.sl-story{padding-top:42px}.sl-story h1{font-size:32px}.sl-story ul{margin-top:28px}.sl-side{padding:24px 16px}.sl-card{padding:28px 24px}.sl-workspaces{justify-content:flex-start;padding:28px 18px}.sl-workspace-grid{grid-template-columns:repeat(2,1fr)}.sl-workspaces h1{font-size:28px}.sl-workspaces>p{text-align:center}}
 
