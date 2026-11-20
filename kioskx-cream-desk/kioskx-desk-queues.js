@@ -590,6 +590,7 @@ body .hired-desk #kioskx-voice-connect a{color:#2f5f8a}
 #support-desk .sd-mail-message.sent{background:#e8eef6}
 #support-desk .sd-mail-body{white-space:normal;overflow-wrap:anywhere;line-height:1.6;background:#fff;color:#242424;padding:16px;border-radius:8px;overflow-x:auto}#support-desk .sd-mail-body img{max-width:100%;height:auto}#support-desk .sd-mail-body table{max-width:100%;border-collapse:collapse;border:0}#support-desk .sd-mail-body td,#support-desk .sd-mail-body th{padding:4px;border:0}#support-desk .sd-mail-body a{color:#245a88;text-decoration:underline}#support-desk .sd-mail-body p{white-space:normal}#support-desk .sd-mail-body pre{white-space:pre-wrap}
 #support-desk .sd-mail-reply textarea{display:block;width:100%;min-height:110px;margin:8px 0}
+#support-desk .sd-mail-reply > button[type=submit]{display:block;margin-left:auto;font-weight:700;min-height:44px}
 #support-desk .sd-mail-paging{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 @media(max-width:760px){#support-desk .sd-mail-layout{display:flex;flex-direction:column;overflow:auto}#support-desk .sd-mail-list{flex:0 0 200px;min-height:0;max-height:200px}#support-desk .sd-mail-thread{flex:0 0 540px;min-height:540px;padding:12px}#support-desk .sd-mail-message{padding:8px}#support-desk .sd-mail-body{padding:8px}}
 #support-desk .sd-embed{position:absolute;left:232px;right:0;top:0;bottom:0;display:flex;flex-direction:column;min-width:0;background:#f3f5f9;overflow:hidden;z-index:1}
