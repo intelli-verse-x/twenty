@@ -83,10 +83,59 @@ function mailBody(message){
  for(const child of parsed.body.childNodes)copy(child,body);
  return body;
 }
+const callPending=new Set(),callResults=new Map();
+const callCopy=status=>status==='queued'?'Your phone should ring now. Answer it, then their phone rings.':status==='connect'?'Connect the office phone once. Then press Call again.':['refused','disconnected','unavailable','expired','blocked'].includes(status)?'No call was placed. Please try Call again.':'The call outcome is not confirmed. Do not press Call again yet.';
+function showVoiceConnect(){const box=document.querySelector('#kioskx-voice-connect');if(box){box.dataset.deskRequested='true';host.querySelector('.sd-rail').insertBefore(box,host.querySelector('.sd-assistant'));box.hidden=false;}}
+async function callPerson(r){
+ if(callPending.has(r.id))return null;
+ callPending.add(r.id);
+ try{
+  const result=await api('call',{leadId:r.id,requestId:crypto.randomUUID()});
+  if(result.thread){r.thread=[...(r.thread||[]).filter(t=>['inbound','incoming'].includes(t.direction)||t.id&&!t.key),...result.thread].sort((a,b)=>new Date(a.time)-new Date(b.time));const stored=data?.queues?.[r.queue]?.rows.find(x=>x.id===r.id);if(stored)stored.thread=r.thread;}
+  callResults.set(r.id,result.status);return result;
+ }catch(error){callResults.set(r.id,'unknown');throw error;}
+ finally{callPending.delete(r.id);for(const b of host?.querySelectorAll('.sd-person-call')||[]){if(b.dataset.leadId===r.id){b.disabled=false;const feedback=b.parentElement.querySelector('.sd-feedback');feedback.textContent=callCopy(callResults.get(r.id));}}}
+}
+function renderCalls(page){
+ const asked=company;
+ page.classList.add('sd-call-page');
+ page.append(el('p','sd-call-instruction','Press Call. Your phone rings. Answer it, and their phone rings from the office line.'),el('p','sd-muted',"Customers see this company's office number."));
+ const people=el('section','sd-call-people');people.setAttribute('aria-label','People to call');page.append(people);
+ const list=rows().filter(r=>matchesCompany(r)&&statusOf(r)!=='Done'&&!r.readOnly&&r.phone);
+ const failed=!data||data.unavailable||data.workUnavailable||queueKeys.some(k=>matchesCompany({queue:k})&&data.queues?.[k]?.unavailable);
+ if(failed)people.append(el('p','sd-card',data?'People could not be loaded. Refresh to try again.':'Loading people…'));
+ else if(!list.length)people.append(el('p','sd-card','No one to call right now.'));
+ for(const r of list){
+  const row=el('article','sd-card sd-call-person'),copy=el('div','sd-call-person-copy');
+  copy.append(el('h2','',r.queue==='kiosk'?'Kiosk inquiry':displayName(r)),el('p','',clean(r.summary||r.message||names[r.queue]+' request').slice(0,180)));
+  const feedback=el('p','sd-feedback');feedback.setAttribute('role','status');
+  const call=button('Call',async()=>{
+   if(callPending.has(r.id)||call.disabled)return;
+   call.disabled=true;feedback.textContent='Requesting your call…';
+   try{const result=await callPerson(r);if(!result)return;feedback.dataset.status=result.status||'';feedback.textContent=callCopy(result.status);if(result.status==='connect'&&page.isConnected&&company===asked)showVoiceConnect();}
+   catch{feedback.dataset.status='unknown';feedback.textContent=callCopy('unknown');}
+   finally{call.disabled=failed;}
+  },'sd-person-call');
+  call.dataset.leadId=r.id;call.disabled=failed||callPending.has(r.id);if(callResults.has(r.id))feedback.textContent=callCopy(callResults.get(r.id));row.append(copy,call,feedback);people.append(row);
+ }
+ const recent=card('RECENT CALLS','Loading recent calls…');page.append(recent);
+ api('quo?company='+encodeURIComponent(asked)).then(result=>{
+  if(!page.isConnected||company!==asked)return;
+  recent.replaceChildren(el('h3','','RECENT CALLS'));
+  if(result?.connected!==true){recent.append(el('p','','Recent calls are unavailable. You can still call a person above.'));return;}
+  if(!result.calls?.length)recent.append(el('p','','No recent calls.'));
+  for(const item of result.calls||[]){
+   const when=item.at&&!isNaN(new Date(item.at))?new Date(item.at).toLocaleString([],{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}):'';
+   const seconds=Math.max(0,Number(item.duration)||0),status=String(item.status||'').toLowerCase();
+   const outcome=['answered','completed'].includes(status)?'answered':status==='missed'?'missed':['no-answer','no_answer','unanswered','busy','failed','canceled','cancelled'].includes(status)?'no answer':'outcome not confirmed';
+   recent.append(el('p','',`${item.direction==='incoming'?'They called':'You called'} · ${outcome}${seconds?' · '+Math.floor(seconds/60)+'m '+seconds%60+'s':''}${when?' · '+when:''}`));
+  }
+ }).catch(()=>{if(page.isConnected)recent.replaceChildren(el('h3','','RECENT CALLS'),el('p','','Recent calls are unavailable. You can still call a person above.'));});
+}
 function renderEmbed(){
  const asked=company,page=el('section','sd-embed sd-mail'),header=el('header','sd-embed-header');
  header.append(el('h1','',queue==='inbox'?company+' · '+desks[company].mail:'Call · '+company));page.append(header);host.append(page);
- if(queue==='call'){const asked=company,status=el('p','sd-card','Opening Quo…');page.append(status);api('quo?company='+encodeURIComponent(asked)).then(result=>{if(!page.isConnected||company!==asked)return;status.remove();if(!result||result.connected!==true){page.append(el('p','sd-card',result?.message||'Quo key is not stored yet.'));return;}if(!result.lines?.length){page.append(el('p','sd-card',result.message||'Quo has no number for this company.'));return;}const lines=card('QUO NUMBERS');for(const line of result.lines)lines.append(el('p','',line.name+' · '+line.number));const recent=card('RECENT CALLS');if(!result.calls?.length)recent.append(el('p','','No recent calls on these numbers.'));for(const item of result.calls||[]){const line=result.lines.find(entry=>entry.id===item.lineId);const when=item.at?new Date(item.at).toLocaleString([],{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}):'';recent.append(el('p','',`${item.direction==='incoming'?'Incoming':'Outgoing'} · ${item.status} · ${line?line.name:''} · ${when}${item.duration?' · '+item.duration+'s':''}`));}page.append(lines,recent,el('p','sd-muted','Nothing is sent from this list. A call from a request still uses the office line.'));}).catch(()=>{if(page.isConnected)status.textContent='Quo could not be reached.';});return;}
+ if(queue==='call'){renderCalls(page);return;}
  const layout=el('div','sd-mail-layout'),list=el('section','sd-mail-list'),thread=el('section','sd-mail-thread');list.setAttribute('aria-label','Company conversations');thread.setAttribute('aria-label','Mail thread');layout.append(list,thread);page.append(layout);
  const live=()=>page.isConnected&&company===asked;let pageNo=1,selected=null,threadVersion=0,listBusy=false,pollThread=null;
  const notice=el('p','sd-mail-sync');notice.setAttribute('role','status');notice.hidden=true;header.append(notice);
@@ -300,7 +349,7 @@ const saveButton=button('Save private note',async()=>{if(busy)return;busy=true;l
 for(const t of ['Reply','Private note','Email']){const b=button(t,()=>{if(tab==='Private note')note=field.value;else draft=field.value;tab=t;field.value=t==='Private note'?note:draft;field.setAttribute('aria-label',t);saveButton.hidden=t!=='Private note';for(const x of tabs.children)x.setAttribute('aria-selected',String(x===b));lock();});b.setAttribute('role','tab');b.setAttribute('aria-selected',String(t==='Reply'));tabs.append(b);controls.push(b);}tabs.setAttribute('role','tablist');composer.append(tabs,field,saveButton);controls.push(field,saveButton);
 if(r.queue==='cleaning'){const row=el('div','sd-reminder'),label=el('label','','Appointment time'),input=el('input');input.setAttribute('aria-label','Appointment time');input.placeholder='10:30 AM';input.maxLength=80;const b=button('Appointment reminder',()=>{const value=input.value.trim();if(tab==='Private note'){note=field.value;tab='Reply';saveButton.hidden=true;for(const x of tabs.children)x.setAttribute('aria-selected',String(x.textContent==='Reply'));}field.value=value?`You have an appointment tomorrow at ${value}.${r.appointmentDate?' Date on the request: '+r.appointmentDate+'.':''}`:'Add the appointment time, then use Appointment reminder.';draft=field.value;field.setAttribute('aria-label','Reply');lock();});label.append(input);row.append(label,b);composer.append(row,el('p','sd-muted','Fills the reply. Does not send.'));controls.push(input,b);}
 center.append(composer,el('p','sd-instruction','Read the request. Write the reply. Then Email, Call, or Text. Nothing is sent until you press one of those.'));
-const actions=el('div','sd-actions');const action=async kind=>{if(busy||blocked||tab==='Private note')return;busy=true;lock();try{if(kind!=='call')await save({draft:field.value});const result=await api(kind==='call'?'call':'queue-send',kind==='call'?{leadId:r.id,requestId:crypto.randomUUID()}:{id:r.id,kind});feedback.dataset.status=result.status||'';feedback.textContent=safe(result.message);r.thread=result.thread?[...(r.thread||[]).filter(t=>['inbound','incoming'].includes(t.direction)||t.id&&!t.key),...result.thread].sort((a,b)=>new Date(a.time)-new Date(b.time)):r.thread;data.queues[r.queue].rows.find(x=>x.id===r.id).thread=r.thread;paintThread();if(result.status==='connect'){const box=document.querySelector('#kioskx-voice-connect');if(box){box.dataset.deskRequested='true';host.querySelector('.sd-rail').insertBefore(box,host.querySelector('.sd-assistant'));box.hidden=false;}}}catch{feedback.dataset.status='error';feedback.textContent='Outcome is unconfirmed. Refresh before trying again.';}finally{busy=false;lock();}};
+const actions=el('div','sd-actions');const action=async kind=>{if(busy||blocked||tab==='Private note')return;busy=true;lock();try{if(kind!=='call')await save({draft:field.value});const result=kind==='call'?await callPerson(r):await api('queue-send',{id:r.id,kind});if(!result)return;feedback.dataset.status=result.status||'';feedback.textContent=kind==='call'?callCopy(result.status):safe(result.message);r.thread=result.thread?[...(r.thread||[]).filter(t=>['inbound','incoming'].includes(t.direction)||t.id&&!t.key),...result.thread].sort((a,b)=>new Date(a.time)-new Date(b.time)):r.thread;data.queues[r.queue].rows.find(x=>x.id===r.id).thread=r.thread;paintThread();if(result.status==='connect')showVoiceConnect();}catch{feedback.dataset.status='error';feedback.textContent=kind==='call'?callCopy('unknown'):'Outcome is unconfirmed. Refresh before trying again.';}finally{busy=false;lock();}};
 const send=button(privateKiosk?'Email as KioskX':'Email as AniDeeBee',()=>action('email'));const call=button('Call their phone',()=>action('call'));const sms=button('Text their phone',()=>action('sms'));actions.append(send,call,sms);center.append(actions,el('p','sd-muted sd-action-help','Email sends the reply above. Call rings their phone from the office Google Voice after this browser is connected. Text sends the reply to a US phone. A number in India is blocked.'),feedback);
 function lock(){for(const c of controls)c.disabled=blocked||busy;send.disabled=blocked||busy||tab==='Private note'||!data.mailEnabled;call.disabled=blocked||busy||tab==='Private note';sms.disabled=blocked||busy||tab==='Private note'||!data.smsEnabled;}lock();if(blocked){feedback.dataset.status='error';feedback.textContent='This queue is unavailable. Try refreshing.';}
 const side=el('aside','sd-right');if(queue==='inbox')side.append(card('AI ASSIST',safe(r.message||r.summary||'No message was submitted.')));const suggested=card('SUGGESTED ARTICLES'),idx=r.queue==='cleaning'?0:r.queue==='cars'?1:r.queue==='kiosk'?3:2,insertFeedback=el('p','sd-feedback');suggested.append(el('p','',articles[idx][0]));const insert=button('Insert link in reply',()=>insertArticle(idx,insertFeedback));insert.disabled=blocked||busy;suggested.append(insert,insertFeedback);controls.push(insert);if(queue==='inbox')side.append(suggested);side.append(fields('CONTACT',[['Email',privateKiosk?'Hidden':r.email||'No email'],['Phone',privateKiosk?'Hidden':r.phone||'No phone'],['Queue',names[r.queue]],['Received',r.when?new Date(r.when).toLocaleString():'Not recorded']],'sd-contact'));const ticket=el('section','sd-card sd-ticket');ticket.append(el('h3','','TICKET (ZAMMAD'));if(r.ticket&&typeof r.ticket==='object'){ticket.append(fields('',Object.entries(r.ticket).filter(([k,v])=>['title','state','priority','group'].includes(k)&&typeof v==='string').map(([k,v])=>[k,safe(v)])));}else ticket.append(el('p','','No ticket yet.'));side.append(ticket);host.append(center,side);
@@ -310,6 +359,16 @@ body .hired-desk > :not(#support-desk):not(#sd-workspaces){display:none!importan
 @media(max-width:1200px){#support-desk.sd-open{grid-template-columns:180px 280px minmax(330px,1fr)}#support-desk .sd-right{grid-column:3}#support-desk .sd-center{grid-row:1 / span 2}#support-desk .sd-right{display:none}#support-desk .sd-center{padding:20px} }
 @media(max-width:700px){#support-desk,#support-desk.sd-open{position:absolute;min-height:100vh;height:auto;grid-template-columns:1fr;overflow:auto}#support-desk .sd-rail{padding:12px}#support-desk nav{display:flex;flex-wrap:wrap;margin-top:10px}#support-desk .sd-list,#support-desk .sd-center,#support-desk .sd-right{grid-column:1;grid-row:auto;overflow:visible;display:block}#support-desk .sd-center{padding:16px}#support-desk dl{grid-template-columns:120px minmax(0,1fr)}#support-desk .sd-actions{flex-wrap:wrap}}
 
+#support-desk .sd-call-page{overflow:auto;min-width:0;padding:24px;display:block}
+#support-desk .sd-call-instruction{font-size:16px;line-height:1.6;margin:16px 0 8px}
+#support-desk .sd-call-people{margin:20px 0}
+#support-desk .sd-call-person{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px 16px;margin-bottom:12px;align-items:center}
+#support-desk .sd-call-person-copy{min-width:0;overflow-wrap:anywhere}
+#support-desk .sd-call-person h2{font-size:18px;margin:0 0 6px}
+#support-desk .sd-call-person .sd-feedback{grid-column:1/-1;margin:0;overflow-wrap:anywhere}
+#support-desk .sd-person-call{background:#1f3a5f;color:white;border:0;border-radius:10px;min-height:44px;min-width:70px;padding:10px 18px;cursor:pointer}
+#support-desk .sd-person-call:disabled{opacity:.6;cursor:wait}
+@media(max-width:700px){#support-desk .sd-call-page{padding:16px}#support-desk .sd-call-person{padding:14px}}
 /* Support Desk: shared cream chrome and responsive work areas. */
 #support-desk{grid-template-columns:232px minmax(0,1fr);color:#1f3a5f}
 #support-desk.sd-open{grid-template-columns:232px 360px minmax(340px,1fr) 280px}
