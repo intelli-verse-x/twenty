@@ -1,9 +1,13 @@
+const smartDesk = require('./desk-smart');
+const browserDesk = require('./desk-browser');
+const syncStore = require('./desk-sync-store');
 const calendarDesk = require('./desk-calendar');
 const applications = require('./desk-applications');
 const studio = require('./desk-voice');
 const crewJobs = require('./crew-jobs');
 const reach = require('./reach');
 const companyDesk = require('./desk-company');
+const quoDesk = require('./desk-quo');
 const { BadRequestException } = require('@nestjs/common');
 const { Client } = require('pg');
 const QUEUES = { cleaning: 'cleaning_request', cars: 'car_request', jobs: 'job_application' };
@@ -12,7 +16,7 @@ const TURO = [
     ['turo:c300', 'Mercedes C300'], ['turo:tesla-2023', '2023 Tesla Model Y'],
     ['turo:gls450', 'Mercedes GLS450'], ['turo:tesla-2027', '2027 Tesla Model Y'],
 ];
-const fleet = () => ({ rows: TURO.map(([id, label]) => ({ id, label, summary: 'Own reminder', status: 'New', note: '' })) });
+const fleet = syncStore.fleet;
 const text = value => ['string', 'number'].includes(typeof value) ? String(value).replace(/[{}]/g, '').trim() : '';
 function details(raw) {
     let value = raw;
@@ -77,7 +81,12 @@ async function queueBoard(desk) {
         const queues = Object.fromEntries(Object.entries(QUEUES).map(([key, kind]) => [key, {
             rows: found.rows.filter(r => r.kind === kind).map(r => row(r, key)).filter(Boolean), empty: 'No requests in this queue.',
         }]));
-        queues.turo = fleet();
+        try {
+            const snapshots=await syncStore.read(client,schema);
+            queues.jobs.rows.push(...syncStore.candidates(snapshots.indeed));
+            queues.jobs.snapshot={readAt:snapshots.indeed?.readAt,checkedAt:snapshots.indeed?.checkedAt,error:snapshots.indeed?.error,jobs:snapshots.indeed?.jobs||[]};
+            queues.turo=fleet(snapshots.turo);
+        } catch { queues.turo={rows:[],error:'Stored fleet is temporarily unavailable.'}; }
         if(desk) queues.kiosk = {rows:await desk.system(async()=> (await desk.records()).map(r=>({id:r.person.id,label:r.label||'Inquiry',email:r.email,phone:r.phone,country:r.person.phones?.primaryPhoneCountryCode||r.person.phones?.primaryPhoneCallingCode,description:r.inquiry,summary:'Kiosk inquiry',when:r.person.createdAt||null,queue:'kiosk',status:'New',draft:''})))};
         let workUnavailable = false;
         try {
@@ -86,7 +95,7 @@ async function queueBoard(desk) {
             for (const queue of Object.values(queues)) for (const item of queue.rows) {
                 const saved = byId.get(item.id);
                 if (saved) Object.assign(item, { status: saved.status, draft: saved.draft, note: saved.note });
-                if (!item.id.startsWith('turo:')) item.thread = await reach.reconcile(reach.store(client,schema),item.id,desk);
+                if (!item.readOnly && !item.id.startsWith('turo:')) item.thread = await reach.reconcile(reach.store(client,schema),item.id,desk);
             }
         } catch { workUnavailable = true; }
         // Reuse the existing mailbox reader and linked Telnyx notes. Never match
@@ -183,13 +192,66 @@ async function inboxLogin(company, env = process.env, request = fetch) {
         return {url:url.href,inbox:`https://inbox.intelli-verse-x.ai/app/accounts/${account}/inbox/${inbox}`};
     } catch { return unavailable(); }
 }
+async function smartMail(id) {
+    const api=await companyDesk.client();
+    const path='/api/v1/accounts/1/conversations/'+id;
+    const conversation=await api(path);
+    if(Number(conversation.inbox_id)!==3)throw new BadRequestException('Conversation unavailable.');
+    const sender=conversation.meta?.sender||{};
+    const messages=await api(path+'/messages');
+    const incoming=(messages.payload||[]).filter(m=>!m.private&&[0,1].includes(m.message_type));
+    const resume=incoming.flatMap(m=>m.attachments||[]).find(a=>/\.(pdf|docx?)(?:\?|$)/i.test(a.file_name||a.filename||a.data_url||''));
+    return {id:'mail:'+id,source:'mail',queue:'inbox',label:sender.name||'Customer',email:sender.email||'',phone:sender.phone_number||'',conversationId:id,
+        resume:resume?{name:resume.file_name||resume.filename||'Resume',url:resume.data_url}:null,
+        messages:incoming.map(m=>({id:m.id,text:m.content||'',kind:'email',direction:m.message_type===0?'inbound':'outbound',time:new Date(Number(m.created_at)*1000).toISOString()}))};
+}
+async function smartEvidence(row) {
+    if(!row.conversationId)return row;
+    try{const mail=await smartMail(row.conversationId);return {...row,messages:mail.messages,resume:row.resume||mail.resume};}
+    catch{return {...row,historyUnavailable:true};}
+}
+async function smartThread(id,desk) {
+    const saved=await reach.withStore(repo=>reach.reconcile(repo,id,desk));
+    const browser=await browserDesk.withClient(async client=>{
+        const schema=await workspace(client);
+        // This table exists only after the first explicit browser Send.
+        const exists=await client.query('SELECT to_regclass($1) AS present',[schema+'."_deskBrowserReply"']);
+        if(!exists.rows[0]?.present)return [];
+        const r=await client.query(`SELECT request_id,body,status,updated_at FROM ${schema}."_deskBrowserReply" WHERE thread_id=$1 ORDER BY updated_at DESC`,[id]);
+        return r.rows.map(r=>({id:r.request_id,kind:'email',direction:'outbound',text:r.body,status:r.status,time:r.updated_at}));
+    });
+    return [...saved,...browser];
+}
 class QueueController {
+    async smartPerson(request) {
+        await this.authorize(request);
+        const board=await queueBoard(this.desk);
+        return smartDesk.person(request.query||{}, {board, applications:()=>applications.read({company:'AniDeeBee'}),mail:smartMail,evidence:smartEvidence,
+            thread:id=>smartThread(id,this.desk)});
+    }
+    async smartSend(request,body) {
+        await this.authorize(request);
+        if(!body || !['email','call','sms'].includes(body.kind) || typeof body.text!=='string' || body.text.length>5000)
+            throw new BadRequestException('Invalid action.');
+        const board=await queueBoard(this.desk);
+        const row=await smartDesk.resolve(body,{board,applications:()=>applications.read({company:'AniDeeBee'}),mail:smartMail});
+        if(board.workUnavailable)throw new BadRequestException('Saved work is unavailable.');
+        if(body.kind==='email' && row.source==='mail')return companyDesk.mailReply({company:'AniDeeBee',conversation:row.conversationId,text:body.text});
+        if(body.kind==='email' && !row.email && row.browserThreadId) {
+            return browserDesk.withClient(client=>browserDesk.reply(client,{company:'AniDeeBee',source:row.source==='turo'?'turo':'indeed',id:row.browserThreadId,text:body.text,requestId:body.requestId}));
+        }
+        return reach.withStore(async repo=>reach.act({id:row.id,kind:body.kind,sessionId:reach.browserSession(request)},
+            {repo:{...repo,draft:async()=>body.text},record:row,...await reach.transports(this.desk)}));
+    }
+    async browserReply(request,body) { await this.authorize(request); return browserDesk.withClient(client=>browserDesk.reply(client,body)); }
+
     async calendar(request) { await this.authorize(request); return calendarDesk.list(request.query || {}); }
     async calendarChange(request, body) { await this.authorize(request); return calendarDesk.change(body || {}); }
     async applications(request) { await this.authorize(request); return applications.read(request.query||{}); }
     async applicationResume(request) { await this.authorize(request); if(request.query?.company!=='AniDeeBee'||!/^[a-f0-9]{8}(?:-[a-f0-9]{4}){3}-[a-f0-9]{12}$/i.test(request.query?.id||''))return request.res.status(404).end();try{const r=await applications.stored('/applications/'+request.query.id+'/resume');request.res.setHeader('Content-Type',r.headers.get('content-type'));request.res.setHeader('Content-Disposition',r.headers.get('content-disposition'));return request.res.send(Buffer.from(await r.arrayBuffer()));}catch{return request.res.status(404).end();} }
 
     async voiceSession(request) { await this.authorize(request); return studio.begin(request); }
+    async quoBoard(request) { await this.authorize(request); return quoDesk.list(request.query?.company); }
     async voiceProxy(request) { const s=studio.session(request);if(!s)return request.res.status(403).send(studio.failure);request.studioAuthorization=request.headers.authorization;request.headers.authorization=s.authorization;await this.authorize(request);return studio.proxy(request,request.res,s); }
 
     async crewJobs(request) { await this.authorize(request); return crewJobs.requestCrew(); }
@@ -223,7 +285,7 @@ class QueueController {
 }
 exports.install = Controller => {
     const common = require('@nestjs/common');
-    for (const [name, route, verb] of [['calendar','calendar','Get'],['calendarChange','calendar','Post'],['applications','applications','Get'],['applicationResume','application-resume','Get'],['voiceSession','voice-session','Get'],['voiceProxy','voice/*','All'],['crewJobs','crew-jobs','Get'],['crewAssign','crew-assign','Post'],['companyMail','company-mail','Get'],['companyReply','company-reply','Post'],['companyEngagement','company-engagement','Get'],['companySend','company-send','Post'],['companySite','company-site','Post'],['inboxLogin','inbox-login','Get'],['queues','queues','Get'],['queueWork','queue-work','Post'],['queueSend','queue-send','Post'],['call','call','Post'],['voiceBridge','voice-bridge','Post']]) {
+    for (const [name, route, verb] of [['smartPerson','smart-person','Get'],['smartSend','smart-send','Post'],['browserReply','browser-reply','Post'],['calendar','calendar','Get'],['calendarChange','calendar','Post'],['applications','applications','Get'],['applicationResume','application-resume','Get'],['voiceSession','voice-session','Get'],['quoBoard','quo','Get'],['voiceProxy','voice/*','All'],['crewJobs','crew-jobs','Get'],['crewAssign','crew-assign','Post'],['companyMail','company-mail','Get'],['companyReply','company-reply','Post'],['companyEngagement','company-engagement','Get'],['companySend','company-send','Post'],['companySite','company-site','Post'],['inboxLogin','inbox-login','Get'],['queues','queues','Get'],['queueWork','queue-work','Post'],['queueSend','queue-send','Post'],['call','call','Post'],['voiceBridge','voice-bridge','Post']]) {
         Object.defineProperty(Controller.prototype, name, Object.getOwnPropertyDescriptor(QueueController.prototype, name));
         const desc = Object.getOwnPropertyDescriptor(Controller.prototype, name);
         common[verb](route)(Controller.prototype, name, desc);

@@ -1,6 +1,6 @@
 (() => {
 
-const names={inbox:'Inbox',call:'Call',cleaning:'Cleaning',cars:'Cars',jobs:'Jobs',kiosk:'Kiosk',today:'Today',queues:'Queues',knowledge:'Knowledge base',insights:'Insights',integrations:'Integrations',companies:'Companies',calendar:'Calendar',engagement:'Engagement'};
+const names={inbox:'Inbox',call:'Call',cleaning:'Cleaning',cars:'Cars',jobs:'Jobs',kiosk:'Kiosk',today:'Today',queues:'Queues',knowledge:'Knowledge base',insights:'Insights',integrations:'Integrations',companies:'Companies',calendar:'Calendar',turo:'Turo',engagement:'Engagement'};
 let data=null,queue='inbox',open='',host=null,busy=false,company='Kiosk X',channel='All',search='',period=7,category='All articles',articleCompany='All',article=0,lastRequest='',drafts={},dismissed=new Set();
 const desks={
  'Kiosk X':{app:'kioskx',mail:'support@kiosk-x.ai',inbox:'https://inbox.intelli-verse-x.ai/app/accounts/1/inbox/101'},
@@ -23,7 +23,11 @@ const api=async(path,body)=>{const r=await fetch('/kioskx-hired-desk/'+path,{met
 const el=(tag,cls,text)=>{const e=document.createElement(tag);if(cls)e.className=cls;if(text!==undefined)e.textContent=text;return e;};
 const clean=v=>String(v??'').replace(/[^\s<>()[\],;:]*@[^\s<>()[\],;:]*/g,'[contact hidden]').replace(/\+?\d[\d ().-]{6,}\d/g,'[contact hidden]');
 const displayName=r=>{const raw=String(r.label||'');const value=r.queue==='kiosk'?raw.split(/\b(?:Email|Phone|City|Message|SMS)\s*(?:\(|:|\/)/i)[0].trim():raw;return clean(value||(r.queue==='kiosk'?'Kiosk inquiry':'Inquiry'));};
-const rows=()=>Object.entries(data?.queues||{}).filter(([k])=>['cleaning','cars','jobs','kiosk'].includes(k)).flatMap(([k,q])=>(q.rows||[]).map(r=>({...r,queue:k})));
+function isTestRecord(name, message='') {
+ return /synthetic|not\s+a\s+candidate|not\s+a\s+real|please\s+discard|form\s+check|test\s+applicant/i.test(`${name||''} ${message||''}`)||
+  /^TTTT$/i.test(String(name||'').trim())||/^(?:test\s*)+$/i.test(String(message||'').trim());
+}
+const rows=()=>Object.entries(data?.queues||{}).filter(([k])=>['cleaning','cars','jobs','kiosk'].includes(k)).flatMap(([k,q])=>(q.rows||[]).filter(r=>k!=='jobs'||!isTestRecord(r.label,(r.fields||[]).filter(([k])=>['Experience','Message'].includes(k)).map(([,v])=>v).join(' '))).map(r=>({...r,queue:k})));
 const time=v=>v&&!isNaN(new Date(v))?new Date(v).toLocaleTimeString([],{hour:'numeric',minute:'2-digit'}):'';
 const chip=s=>el('span','sd-chip sd-'+s.toLowerCase().replace(/^\d+ /,'').replaceAll(' ','-'),s);
 const button=(text,fn,cls='')=>{const b=el('button',cls,text);b.type='button';b.onclick=fn;return b;};
@@ -32,15 +36,64 @@ function activity(){return rows().flatMap(r=>(r.thread||[]).filter(t=>new Date(t
 function today(expanded=false){const a=activity().filter(t=>matchesCompany(t.row)),box=el('details','sd-today');box.open=expanded;const n=k=>a.filter(t=>t.kind===k).length;box.append(el('summary','',unavailable()?'Today: activity unavailable.':a.length?`Today: ${n('email')} emails, ${n('call')} calls, ${n('sms')} texts.`:'Today: nothing sent.'));for(const t of a)box.append(el('p','',`${names[t.row.queue]} — ${displayName(t.row)} — ${t.kind==='email'?'Email sent':t.kind==='sms'?'Text sent':t.status==='queued'?'Call queued':'Call completed'} — ${time(t.time)}`));return box;}
 function legend(){const card=el('section','sd-card sd-legend');card.append(el('h3','','STATUS MEANING'));for(const [s,d]of [['New','Not contacted'],['Call next','You still need to call'],['Waiting','Waiting on them'],['Done','Finished']]){const p=el('p');p.append(chip(s),el('span','',d));card.append(p);}card.append(el('p','sd-muted','These chips do not send anything.'));return card;}
 function fields(title,pairs,cls=''){const card=el('section','sd-card '+cls);card.append(el('h3','',title));const dl=el('dl');for(const [k,v]of pairs){dl.append(el('dt','',k),el('dd','',v));}card.append(dl);return card;}
-function navigate(k,id=''){if(busy)return;remember();if(queueKeys.includes(k))company=deskOf({queue:k});queue=k;open=id;if(id)lastRequest=id;search='';channel='All';window.kxQueue=k;render();if(k==='jobs')loadApplications();}
-async function loadApplications(){
- try{const result=await api('applications?company=AniDeeBee');if(!data?.queues)return;const existing=data.queues.jobs?.rows||[];const merged=new Map(existing.map(r=>[r.id,r]));for(const r of result.applications||[])merged.set(r.id,{...r,...merged.get(r.id),fields:r.fields,resume:r.resume,readOnly:!merged.has(r.id)});data.queues.jobs={...data.queues.jobs,rows:[...merged.values()].sort((a,b)=>new Date(b.when)-new Date(a.when)),applicationUnavailable:result.unavailable};if(queue==='jobs'&&company==='AniDeeBee'&&!open)render();}catch{if(data?.queues?.jobs)data.queues.jobs.applicationUnavailable=true;}
+function navigate(k,id=''){if(busy)return;remember();if(queueKeys.includes(k))company=deskOf({queue:k});queue=k;open=id;if(id)lastRequest=id;search='';channel='All';window.kxQueue=k;render();if(company==='AniDeeBee'&&['inbox','call','jobs','today','queues','engagement'].includes(k))loadApplications();}
+let applicationLoad=null,applicationTimer=null,applicationsLoadedAt=0;
+const indeedFailure='Indeed applications could not be loaded. Showing the applications saved on the desk.';
+function applicationNotice(parent) {
+ if(company!=='AniDeeBee')return;
+ const jobs=data?.queues?.jobs;
+ if(jobs?.snapshot)sourceNotice(parent,jobs.snapshot);
+ if(jobs?.applicationLoading)parent.append(el('p','sd-muted sd-application-status','Loading Indeed applications. Showing the applications saved on the desk.'));
+ if(jobs?.applicationUnavailable){
+  const notice=el('div','sd-application-status');notice.setAttribute('role','status');
+  notice.append(el('p','sd-muted',indeedFailure),button('Retry Indeed',()=>loadApplications(true)));
+  parent.append(notice);
+ }
+ if(jobs?.savedApplicationsUnavailable)parent.append(el('p','sd-muted','Saved application files could not be loaded. Showing the requests already on the desk.'));
+}
+function updateApplicationView() {
+ for(const paint of smartLists)paint();
+ window.kxQueueCounts=Object.fromEntries(Object.keys(names).map(k=>[k,rows().filter(r=>r.queue===k).length]));
+ if(company==='AniDeeBee'&&['jobs','queues'].includes(queue)&&!open){remember();render();}
+}
+async function loadApplications(force=false){
+ if(!data?.queues||applicationLoad)return;
+ if(!force&&Date.now()-applicationsLoadedAt<60000)return;
+ const board=data;
+ applicationLoad=board;
+ clearTimeout(applicationTimer);
+ board.queues.jobs=board.queues.jobs||{rows:[]};
+ const jobs=board.queues.jobs;
+ jobs.applicationLoading=true;jobs.applicationUnavailable=false;
+ updateApplicationView();
+ function merge(result,source) {
+  if(data!==board)return;
+  const existing=jobs.rows||[], byId=new Map(existing.map(r=>[r.id,r]));
+  for(const r of result.applications||[])byId.set(r.id,{...r,...byId.get(r.id),fields:r.fields,resume:r.resume,readOnly:byId.has(r.id)?!!byId.get(r.id).readOnly:true,applicationSource:source});
+  jobs.rows=[...byId.values()].sort((a,b)=>new Date(b.when||0)-new Date(a.when||0));
+ }
+ const saved=api('applications?company=AniDeeBee&source=saved').then(result=>{
+  if(data!==board)return;merge(result,'saved');jobs.savedApplicationsUnavailable=!!result.unavailable;updateApplicationView();
+ }).catch(()=>{if(data===board){jobs.savedApplicationsUnavailable=true;updateApplicationView();}});
+ const started=Date.now();
+ async function poll(){
+  try {
+   const result=await api('applications?company=AniDeeBee&source=indeed');
+   if(data!==board)return;
+   merge(result,'indeed');jobs.applicationLoading=!!result.loading;jobs.applicationUnavailable=!!result.unavailable;
+   if(result.loading&&Date.now()-started<180000){applicationTimer=setTimeout(poll,1500);}
+   else {jobs.applicationLoading=false;jobs.applicationUnavailable=!!result.unavailable||!!result.loading;applicationLoad=null;applicationsLoadedAt=Date.now();}
+  } catch {if(data===board){jobs.applicationLoading=false;jobs.applicationUnavailable=true;applicationLoad=null;applicationsLoadedAt=0;}}
+  if(data===board)updateApplicationView();
+ }
+ // Each source paints independently; saved applications never wait for Indeed.
+ void saved;void poll();
 }
 function resumeLink(r){const link=el('a','sd-resume','Open resume');link.href=r.resume.url||'/kioskx-hired-desk/'+r.resume.path;link.target='_blank';link.rel='noopener noreferrer';if(r.resume.path)link.onclick=async e=>{e.preventDefault();try{const response=await fetch(link.href,{headers:{Authorization:'Bearer '+token()},cache:'no-store'});if(!response.ok)throw Error();const url=URL.createObjectURL(await response.blob());const a=el('a');a.href=url;a.download=r.resume.name||'resume';a.click();setTimeout(()=>URL.revokeObjectURL(url),60000);}catch{link.textContent='Resume unavailable — try again';}};return link;}
-function remember(){const field=host?.querySelector('textarea[aria-label="Reply"],textarea[aria-label="Email"]');if(open&&field)drafts[open]=field.value;}
+function remember(){const field=host?.querySelector('textarea[aria-label="Reply"],textarea[aria-label="Email"]');if(open&&field){drafts[open]=field.value;const row=rows().find(r=>r.id===open);if(row&&company==='AniDeeBee')personEdits.set(personKey(row),field.value);}}
 function pills(values,selected,onchange){const wrap=el('div','sd-pills');for(const v of values){const b=button(v,()=>onchange(v));b.setAttribute('aria-pressed',String(v===selected));wrap.append(b);}return wrap;}
 function companyPills(){return el('span','sd-selected-company',company);}
-function rowButton(r,label){const b=button('',()=>navigate(queue==='inbox'?'inbox':r.queue,r.id),'sd-row');b.setAttribute('aria-pressed',String(r.id===open));const n=displayName(r),copy=el('span','sd-row-copy'),line=el('span');line.append(el('strong','',n),el('small','',names[r.queue]));copy.append(line,el('span','sd-preview',clean(r.summary||r.message||'Inquiry')));const end=el('span','sd-row-end');end.append(el('time','',time(r.when)),chip(statusOf(r)));if(label)end.append(el('span','',label));b.append(el('span','sd-avatar',n[0].toUpperCase()),copy,end);return b;}
+function rowButton(r,label){const b=button('',()=>navigate(queue==='inbox'?'inbox':r.queue,r.id),'sd-row');b.dataset.threadId=r.browserThreadId||r.id;b.setAttribute('aria-pressed',String(r.id===open));const n=displayName(r),copy=el('span','sd-row-copy'),line=el('span');line.append(el('strong','',n),el('small','',names[r.queue]));copy.append(line,el('span','sd-preview',clean(r.summary||r.message||'Inquiry')));const end=el('span','sd-row-end');end.append(el('time','',time(r.when)),chip(statusOf(r)));if(label)end.append(el('span','',label));b.append(el('span','sd-avatar',n[0].toUpperCase()),copy,end);return b;}
 function card(title,text){const c=el('section','sd-card');c.append(el('h3','',title));if(text)c.append(el('p','',text));return c;}
 function kpis(items){const wrap=el('div','sd-kpis');for(const [label,value,note]of items){const c=card(label);c.prepend(el('strong','sd-number',value));if(note)c.append(el('p','sd-muted',note));wrap.append(c);}return wrap;}
 function sessionName(){
@@ -54,15 +107,153 @@ function logOut(){
  if(!native){const notice=host.querySelector('.sd-session-status');notice.textContent='Sign out is unavailable. Reload the page and try again.';return;}
  // Invoke the CRM boundary: it clears its session atom and redirects to login.
  localStorage.removeItem('sd-session-email');localStorage.removeItem('sd-session-only');sessionStorage.removeItem('sd-session-active');
- drafts={};dismissed.clear();data=null;open='';queue='inbox';company='Kiosk X';lastRequest='';window.kxQueueCounts=null;
+ drafts={};personEdits.clear();personDrafts.clear();personActions.clear();mailboxEdits.clear();dismissed.clear();data=null;open='';queue='inbox';company='Kiosk X';lastRequest='';window.kxQueueCounts=null;
  native.click();
 }
-function render(){if(!host)return;const voice=document.querySelector('#kioskx-voice-connect');if(voice){delete voice.dataset.deskRequested;if(host.contains(voice))document.querySelector('.hired-desk').append(voice);}host.replaceChildren();const all=rows().filter(matchesCompany),current=all.find(r=>r.id===open);host.classList.toggle('sd-open',!!current);host.classList.toggle('sd-inbox-open',!!current&&queue==='inbox');const rail=el('aside','sd-rail');rail.setAttribute('aria-label','Support Desk');const brand=brandMark(),mark=el('img','sd-logo');mark.src='data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDgiIGhlaWdodD0iNDgiIHZpZXdCb3g9IjAgMCA0OCA0OCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPGcgY2xpcC1wYXRoPSJ1cmwoI2NsaXAwXzI0XzMyKSI+CjxwYXRoIGQ9Ik0zNiAwSDEyQzUuMzcyNTggMCAwIDUuMzcyNTggMCAxMlYzNkMwIDQyLjYyNzQgNS4zNzI1OCA0OCAxMiA0OEgzNkM0Mi42Mjc0IDQ4IDQ4IDQyLjYyNzQgNDggMzZWMTJDNDggNS4zNzI1OCA0Mi42Mjc0IDAgMzYgMFoiIGZpbGw9IiMxRjNBNUYiLz4KPHBhdGggZD0iTTE1IDEyLjVWMjVDMTUgMjcuMzg2OSAxNS45NDgyIDI5LjY3NjEgMTcuNjM2IDMxLjM2NEMxOS4zMjM5IDMzLjA1MTggMjEuNjEzMSAzNCAyNCAzNEMyNi4zODY5IDM0IDI4LjY3NjEgMzMuMDUxOCAzMC4zNjQgMzEuMzY0QzMyLjA1MTggMjkuNjc2MSAzMyAyNy4zODY5IDMzIDI1VjEyLjUiIHN0cm9rZS13aWR0aD0iNC42IiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiIHN0cm9rZT0id2hpdGUiLz4KPHBhdGggZD0iTTI0IDIwLjZDMjUuODc3OCAyMC42IDI3LjQgMTkuMDc3OCAyNy40IDE3LjJDMjcuNCAxNS4zMjIzIDI1Ljg3NzggMTMuOCAyNCAxMy44QzIyLjEyMjIgMTMuOCAyMC42IDE1LjMyMjMgMjAuNiAxNy4yQzIwLjYgMTkuMDc3OCAyMi4xMjIyIDIwLjYgMjQgMjAuNloiIGZpbGw9IiM4RkI0RkYiLz4KPC9nPgo8ZGVmcz4KPGNsaXBQYXRoIGlkPSJjbGlwMF8yNF8zMiI+CjxyZWN0IHdpZHRoPSI0OCIgaGVpZ2h0PSI0OCIgZmlsbD0id2hpdGUiLz4KPC9jbGlwUGF0aD4KPC9kZWZzPgo8L3N2Zz4K';mark.alt='';brand.querySelector('.sl-mark').replaceWith(mark);rail.append(brand,el('span','sd-sr-only','Support Desk'));
-const switcher=el('label','sd-switcher');switcher.append(el('span','sd-brand','COMPANY / APP ID'));const switchLine=el('div','sd-switch-line');const dots=el('span','sd-dots');dots.setAttribute('aria-hidden','true');dots.append(el('i'),el('i'),el('i'));const select=el('select');select.setAttribute('aria-label','Company');for(const c of companies){const o=el('option','',c==='All'?'All companies':c);o.value=c;select.append(o);}select.value=company;select.onchange=()=>{remember();company=select.value;queue=queueKeys.includes(queue)?'queues':queue;open='';search='';render();};switchLine.append(dots,select);switcher.append(switchLine);rail.append(switcher);
-const nav=el('nav');nav.setAttribute('aria-label','Desk');for(const k of ['inbox','call','engagement','today','queues','knowledge','insights','integrations','companies','calendar']){const b=button(names[k],()=>navigate(k));b.setAttribute('aria-pressed',String(k===queue||(k==='queues'&&queueKeys.includes(queue))));if(k==='today')b.append(el('span','',activity().filter(t=>matchesCompany(t.row)).length));nav.append(b);if(k==='queues'&&(queue==='queues'||queueKeys.includes(queue)))for(const q of queueKeys.filter(q=>matchesCompany({queue:q}))){const qb=button(names[q],()=>navigate(q),'sd-subnav');qb.append(el('span','',all.filter(r=>r.queue===q&&statusOf(r)!=='Done').length));qb.setAttribute('aria-pressed',String(q===queue));nav.append(qb);}}rail.append(nav);const assistant=card('AI assistant','Drafts replies and finds articles. Never sends by itself.');assistant.classList.add('sd-assistant');rail.append(assistant);const account=el('footer','sd-account');account.append(el('strong','sd-session-name',sessionName()),button('Log out',logOut),el('p','sd-access-status',company+' · '+appIds[company]),el('p','sd-session-status'));rail.append(account);host.append(rail);
+function render(){if(!host)return;const voice=document.querySelector('#kioskx-voice-connect');if(voice){delete voice.dataset.deskRequested;if(host.contains(voice))document.querySelector('.hired-desk').append(voice);}host.replaceChildren();host.classList.remove('sd-reading-mail');const all=rows().filter(matchesCompany),current=all.find(r=>r.id===open&&r.queue===queue);host.classList.toggle('sd-open',!!current);host.classList.toggle('sd-person-open',!!current&&company==='AniDeeBee');host.classList.toggle('sd-inbox-open',!!current&&queue==='inbox');const rail=el('aside','sd-rail');rail.setAttribute('aria-label','Support Desk');const brand=brandMark(),mark=el('img','sd-logo');mark.src='data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDgiIGhlaWdodD0iNDgiIHZpZXdCb3g9IjAgMCA0OCA0OCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPGcgY2xpcC1wYXRoPSJ1cmwoI2NsaXAwXzI0XzMyKSI+CjxwYXRoIGQ9Ik0zNiAwSDEyQzUuMzcyNTggMCAwIDUuMzcyNTggMCAxMlYzNkMwIDQyLjYyNzQgNS4zNzI1OCA0OCAxMiA0OEgzNkM0Mi42Mjc0IDQ4IDQ4IDQyLjYyNzQgNDggMzZWMTJDNDggNS4zNzI1OCA0Mi42Mjc0IDAgMzYgMFoiIGZpbGw9IiMxRjNBNUYiLz4KPHBhdGggZD0iTTE1IDEyLjVWMjVDMTUgMjcuMzg2OSAxNS45NDgyIDI5LjY3NjEgMTcuNjM2IDMxLjM2NEMxOS4zMjM5IDMzLjA1MTggMjEuNjEzMSAzNCAyNCAzNEMyNi4zODY5IDM0IDI4LjY3NjEgMzMuMDUxOCAzMC4zNjQgMzEuMzY0QzMyLjA1MTggMjkuNjc2MSAzMyAyNy4zODY5IDMzIDI1VjEyLjUiIHN0cm9rZS13aWR0aD0iNC42IiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiIHN0cm9rZT0id2hpdGUiLz4KPHBhdGggZD0iTTI0IDIwLjZDMjUuODc3OCAyMC42IDI3LjQgMTkuMDc3OCAyNy40IDE3LjJDMjcuNCAxNS4zMjIzIDI1Ljg3NzggMTMuOCAyNCAxMy44QzIyLjEyMjIgMTMuOCAyMC42IDE1LjMyMjMgMjAuNiAxNy4yQzIwLjYgMTkuMDc3OCAyMi4xMjIyIDIwLjYgMjQgMjAuNloiIGZpbGw9IiM4RkI0RkYiLz4KPC9nPgo8ZGVmcz4KPGNsaXBQYXRoIGlkPSJjbGlwMF8yNF8zMiI+CjxyZWN0IHdpZHRoPSI0OCIgaGVpZ2h0PSI0OCIgZmlsbD0id2hpdGUiLz4KPC9jbGlwUGF0aD4KPC9kZWZzPgo8L3N2Zz4K';mark.alt='';brand.querySelector('.sl-mark').replaceWith(mark);rail.append(brand,el('span','sd-sr-only','Support Desk'));
+const switcher=el('label','sd-switcher');switcher.append(el('span','sd-brand','COMPANY / APP ID'));const switchLine=el('div','sd-switch-line');const dots=el('span','sd-dots');dots.setAttribute('aria-hidden','true');dots.append(el('i'),el('i'),el('i'));const select=el('select');select.setAttribute('aria-label','Company');for(const c of companies){const o=el('option','',c==='All'?'All companies':c);o.value=c;select.append(o);}select.value=company;select.onchange=()=>{remember();company=select.value;queue=queueKeys.includes(queue)?'queues':queue;open='';search='';render();if(company==='AniDeeBee')loadApplications();};switchLine.append(dots,select);switcher.append(switchLine);rail.append(switcher);
+const nav=el('nav');nav.setAttribute('aria-label','Desk');for(const k of ['inbox','call',...(company==='AniDeeBee'?['turo']:[]),'engagement','today','queues','knowledge','insights','integrations','companies','calendar']){const b=button(names[k],()=>navigate(k));b.setAttribute('aria-pressed',String(k===queue||(k==='queues'&&queueKeys.includes(queue))));if(k==='today')b.append(el('span','',activity().filter(t=>matchesCompany(t.row)).length));nav.append(b);if(k==='queues'&&(queue==='queues'||queueKeys.includes(queue)))for(const q of queueKeys.filter(q=>matchesCompany({queue:q}))){const qb=button(names[q],()=>navigate(q),'sd-subnav');qb.append(el('span','',all.filter(r=>r.queue===q&&statusOf(r)!=='Done').length));qb.setAttribute('aria-pressed',String(q===queue));nav.append(qb);}}rail.append(nav);const assistant=card('AI assistant','Drafts replies and finds articles. Never sends by itself.');assistant.classList.add('sd-assistant');rail.append(assistant);const account=el('footer','sd-account');account.append(el('strong','sd-session-name',sessionName()),button('Log out',logOut),el('p','sd-access-status',company+' · '+appIds[company]),el('p','sd-session-status'));rail.append(account);host.append(rail);
 if(queue==='inbox'||queue==='call'){renderEmbed();return;}
-if(!queueKeys.includes(queue)){const page=el('section','sd-page sd-page-'+queue);page.append(el('h1','',queue==='integrations'?'Connect a company mailbox':queue==='companies'?'Companies and access':names[queue]));host.append(page);if(queue==='engagement')renderEngagement(page);if(queue==='today')renderToday(page,all);if(queue==='queues')renderQueues(page,all);if(queue==='knowledge')renderKnowledge(page);if(queue==='insights')renderInsights(page,all);if(queue==='integrations')renderIntegrations(page);if(queue==='companies')renderCompanies(page);if(queue==='calendar')renderCalendar(page);pageHeader(page);return;}
-const list=el('section','sd-list');list.setAttribute('aria-label','Request list');list.append(el('h1','',names[queue]),el('p','sd-subtitle',`${company==='All'?'All companies':company} · ${all.filter(r=>statusOf(r)!=='Done').length} open`));const input=el('input','sd-search');input.placeholder='Search name, company, email, request';input.setAttribute('aria-label',input.placeholder);input.value=search;input.oninput=()=>{search=input.value;paintRows();};if(current&&queue==='inbox')list.append(input);if(current&&queue==='inbox'){list.append(companyPills(),pills(['All','Email','Phone','Text','Web'],channel,v=>{remember();channel=v;render();}));}if(queue!=='inbox'||!current)list.append(today(!current&&activity().length>0));const results=el('div');list.append(results);function paintRows(){results.replaceChildren();if(queue==='jobs'&&data?.queues?.jobs?.applicationUnavailable)results.append(el('p','sd-muted','Some applications could not be checked. Showing stored applications.'));let subset=all.filter(r=>(queue==='inbox'||(current&&queueKeys.includes(queue))||r.queue===queue)&&(!search||[displayName(r),companyOf(r),r.queue,r.queue==='kiosk'?'':r.email,r.summary,r.queue==='kiosk'?clean(r.message):r.message].join(' ').toLowerCase().includes(search.toLowerCase()))&&(channel==='All'||channel==='Web'||(r.thread||[]).some(t=>t.kind===({Email:'email',Phone:'call',Text:'sms'}[channel]))));if(data?.unavailable||data?.queues?.[queue]?.unavailable)results.append(el('p','sd-card sd-queue-unavailable','This queue is unavailable. Try refreshing.'));else if(!subset.length){results.append(el('p','sd-card',data?(queue==='jobs'?'No applications yet.':'No requests in this queue.'):'Loading requests…'));if(data)results.append(el('p','sd-instruction','Read the request. Write the reply. Then Email, Call, or Text. Nothing is sent until you press one of those.'));}for(const r of subset)results.append(rowButton(r));}paintRows();if(queue!=='inbox'||!current)list.append(legend());host.append(list);if(current)detail(current);if(current&&queue==='inbox'){const header=el('header','sd-inbox-header');header.append(list.querySelector('h1'),list.querySelector('.sd-subtitle'),input);host.append(header);}else list.querySelector('.sd-subtitle')?.remove();}
+if(!queueKeys.includes(queue)){const page=el('section','sd-page sd-page-'+queue);page.append(el('h1','',queue==='integrations'?'Connect a company mailbox':queue==='companies'?'Companies and access':names[queue]));host.append(page);if(queue==='engagement')renderEngagement(page);if(queue==='today')renderToday(page,all);if(queue==='queues')renderQueues(page,all);if(queue==='knowledge')renderKnowledge(page);if(queue==='insights')renderInsights(page,all);if(queue==='integrations')renderIntegrations(page);if(queue==='companies')renderCompanies(page);if(queue==='calendar')renderCalendar(page);if(queue==='turo')renderFleet(page);pageHeader(page);return;}
+const list=el('section','sd-list');list.setAttribute('aria-label','Request list');list.append(el('h1','',names[queue]),el('p','sd-subtitle',`${company==='All'?'All companies':company} · ${all.filter(r=>r.queue===queue&&statusOf(r)!=='Done').length} open`));const input=el('input','sd-search');input.placeholder='Search name, company, email, request';input.setAttribute('aria-label',input.placeholder);input.value=search;input.oninput=()=>{search=input.value;paintRows();};if(current&&queue==='inbox')list.append(input);if(current&&queue==='inbox'){list.append(companyPills(),pills(['All','Email','Phone','Text','Web'],channel,v=>{remember();channel=v;render();}));}if(queue!=='inbox'||!current)list.append(today(!current&&activity().length>0));const results=el('div');list.append(results);function paintRows(){if(!list.isConnected&&results.children.length){smartLists.delete(paintRows);return;}results.replaceChildren();if(queue==='jobs')applicationNotice(results);if(queue==='jobs'&&data?.queues?.jobs?.applicationUnavailable)results.append(el('p','sd-muted','Some applications could not be checked. Showing stored applications.'));let subset=rows().filter(matchesCompany).filter(r=>(r.queue===queue)&&(!search||[displayName(r),companyOf(r),r.queue,r.queue==='kiosk'?'':r.email,r.summary,r.queue==='kiosk'?clean(r.message):r.message].join(' ').toLowerCase().includes(search.toLowerCase()))&&(channel==='All'||channel==='Web'||(r.thread||[]).some(t=>t.kind===({Email:'email',Phone:'call',Text:'sms'}[channel]))));if(data?.unavailable||data?.queues?.[queue]?.unavailable)results.append(el('p','sd-card sd-queue-unavailable','This queue is unavailable. Try refreshing.'));else if(!subset.length){results.append(el('p','sd-card',data?(queue==='jobs'?'No applications yet.':'No requests in this queue.'):'Loading requests…'));if(data)results.append(el('p','sd-instruction','Read the request. Write the reply. Then Email, Call, or Text. Nothing is sent until you press one of those.'));}for(const r of subset)results.append(rowButton(r));}paintRows();if(queue==='jobs')smartLists.add(paintRows);if(queue!=='inbox'||!current)list.append(legend());host.append(list);if(current)detail(current);if(current&&queue==='inbox'){const header=el('header','sd-inbox-header');header.append(list.querySelector('h1'),list.querySelector('.sd-subtitle'),input);host.append(header);}else list.querySelector('.sd-subtitle')?.remove();}
+function sourceNotice(parent,snapshot){
+ if(!snapshot)return;
+ const box=el('div','sd-source-status');box.setAttribute('role','status');
+ const stamp=snapshot.readAt?new Date(snapshot.readAt).toLocaleDateString('en-GB',{day:'numeric',month:'short',year:'numeric',timeZone:'UTC'}):'';
+ box.append(el('p','sd-muted',stamp?'Snapshot read '+stamp+' · signed-in website':'No website snapshot has been read.'));
+ if(snapshot.checkedAt)box.append(el('p','sd-muted','Last successful refresh '+new Date(snapshot.checkedAt).toLocaleString()+'.'));
+ box.append(el('p','sd-muted',snapshot.error||'Account refresh runs every six hours. The saved list stays here if refresh stops.'));
+ parent.append(box);
+}
+// All AniDeeBee pages open the same person card. Reading never invokes an action.
+const personEdits=new Map(), personDrafts=new Map(), personActions=new Map();
+const smartLists=new Set();
+function personKey(r){return (r.source==='turo'?'turo:':'person:')+r.id;}
+function personInput(r){return {company:'AniDeeBee',source:['turo','mail'].includes(r.source)?r.source:'application',id:r.id};}
+function personCard(parent,r){
+ const key=personKey(r);parent.replaceChildren();parent.classList.add('sd-person-card');parent.dataset.personId=r.id;parent.dataset.threadId=r.browserThreadId||r.id;parent.dataset.threadUrl=r.threadUrl||'';
+ const head=el('header','sd-person-heading');head.append(el('h2','',r.label||r.name||'Person'),el('p','',r.service||r.summary||r.role||''));parent.append(head);
+ const resume=el('section','sd-person-resume'),reply=el('form','sd-person-email sd-fleet-reply'),history=el('section','sd-person-history');
+ resume.append(el('h3','','Resume'));
+ if(r.source!=='turo'&&r.fields?.length)parent.append(fields('WHAT THEY ASKED',r.fields));
+ function paintResume(value){resume.replaceChildren(el('h3','','Resume'));if(!value){resume.append(el('p','','No resume in this application.'));return;}
+  resume.append(el('p','',value.name||'Resume'));const status=el('p','sd-feedback');
+  const preview=el('iframe','sd-resume-preview');preview.title='Resume';preview.hidden=true;preview.setAttribute('sandbox','');
+  const show=button('Open resume',async()=>{show.disabled=true;status.textContent='Opening resume…';try{
+   const url=value.path?'/kioskx-hired-desk/'+value.path:value.url;const parsed=new URL(url,location.origin);
+   if(parsed.origin!==location.origin&&parsed.protocol!=='https:')throw Error();
+   if(parsed.origin===location.origin){const response=await fetch(url,{headers:{Authorization:'Bearer '+token()},cache:'no-store'});if(!response.ok)throw Error();const blob=await response.blob();const object=URL.createObjectURL(blob);preview.src=object;setTimeout(()=>URL.revokeObjectURL(object),300000);}
+   else preview.src=parsed.href;
+   preview.hidden=false;status.textContent='';
+  }catch{status.textContent='Resume unavailable. Try opening it again.';}finally{show.disabled=false;}});
+  show.classList.add('sd-resume');resume.append(show,preview,status);
+ }
+ paintResume(r.resume);if(r.queue==='cars'&&r.source!=='turo')parent.append(el('p','sd-muted','This request does not reserve a car.'));reply.append(el('h3','','Email'));
+ const label=el('label','','Reply as AniDeeBee'),field=el('textarea');field.setAttribute('aria-label','Reply');field.maxLength=5000;
+ field.value=personEdits.get(key)??drafts[r.id]??personDrafts.get(key)??r.draft??'';
+ field.placeholder='Preparing your draft…';label.append(field);reply.append(label);
+ const draftStatus=el('p','sd-draft-status',field.value?'Review and edit before sending.':'Preparing your draft…');draftStatus.setAttribute('role','status');reply.append(draftStatus);
+ if(r.queue==='cleaning'){
+  const reminder=el('div','sd-reminder'),time=el('input');time.setAttribute('aria-label','Appointment time');time.placeholder='Appointment time';
+  reminder.append(time,button('Appointment reminder',()=>{field.value=time.value.trim()?`You have an appointment tomorrow at ${time.value.trim()}.${r.appointmentDate?' Date on the request: '+r.appointmentDate+'.':''}`:'Add the appointment time, then use Appointment reminder.';personEdits.set(key,field.value);field.dispatchEvent(new Event('input'));}));reply.append(reminder,el('p','sd-muted','Fills the reply. Does not send.'));
+ }
+ const actions=el('div','sd-person-actions'),feedback=el('p','sd-feedback');feedback.setAttribute('role','status');
+ let phone=!!r.phone,submitting=false;
+ const call=button('Call',()=>act('call'),'sd-person-call'),send=button('Send',()=>act('email'),'sd-person-send sd-fleet-send');
+ reply.onsubmit=event=>{event.preventDefault();void act('email');};
+ const phoneStatus=el('p','sd-phone-status');
+ function lock(){const prior=personActions.get(key);const blocked=!!data?.unavailable||!!data?.workUnavailable||!!data?.queues?.[r.queue]?.unavailable;send.disabled=blocked||submitting||!!prior?.email||!field.value.trim();call.disabled=blocked||submitting||!!prior?.call;field.readOnly=submitting||!!prior?.email;}
+ field.oninput=()=>{personEdits.set(key,field.value);lock();};
+ async function act(kind){
+  if(submitting||personActions.get(key)?.[kind]||(kind!=='call'&&!field.value.trim()))return;
+  if(kind==='call'&&!phone){feedback.textContent='No phone number in this record. No call was placed.';return;}
+  submitting=true;lock();feedback.textContent=kind==='call'?'Requesting your call…':'Sending…';
+  const state=personActions.get(key)||{};state[kind]='pending';personActions.set(key,state);
+  try{const browserSend=kind==='email'&&!r.email&&(r.source==='turo'||r.browserThreadId);const result=await api(browserSend?'browser-reply':'smart-send',browserSend?{company:'AniDeeBee',source:r.source==='turo'?'turo':'indeed',id:r.browserThreadId||r.id,text:field.value,requestId:crypto.randomUUID()}:{...personInput(r),kind,text:field.value,requestId:crypto.randomUUID()});
+   feedback.dataset.status=result.status||'unknown';
+   state[kind]=['blocked','connect','refused','unavailable','expired','disconnected','draft'].includes(result.status)?'':result.status||'unknown';
+   feedback.textContent=kind==='call'?callCopy(result.status):(result.status==='not_sent'?'Not sent. ':'')+(result.message||(['sent','accepted'].includes(result.status)?'Sent':'Send could not be confirmed. Do not resend.'));
+   if(result.status==='connect'&&parent.isConnected&&company==='AniDeeBee')showVoiceConnect();if(result.thread)paintHistory(result.thread);
+   if(['sent','accepted'].includes(result.status)&&kind==='email'){personEdits.set(key,'');field.value='';}
+  }catch{state[kind]='unknown';feedback.textContent=kind==='call'?callCopy('unknown'):'Send could not be confirmed. Do not resend.';}
+  finally{submitting=false;personActions.set(key,state);lock();}
+ }
+ actions.append(call,send);reply.append(actions,phoneStatus,feedback,el('p','sd-muted','Nothing is sent or called until you press Send or Call.'));
+ function paintHistory(items){history.replaceChildren(el('h3','','Transcript'));
+  const transcripts=(items||[]).filter(t=>t.kind==='call'&&t.transcript);
+  if(!transcripts.length)history.append(el('p','sd-no-transcript','No transcript yet.'));
+  for(const t of transcripts)history.append(el('p','sd-transcript',t.transcript));
+  history.append(el('h3','','Conversation'));
+  const ordered=[...(items||[])].sort((a,b)=>(Date.parse(b.time)||0)-(Date.parse(a.time)||0));
+  if(!ordered.length)history.append(el('p','sd-muted','No messages or calls saved yet.'));
+  for(const t of ordered){const box=el('article','sd-person-event');const incoming=['inbound','incoming','received'].includes(t.direction);
+   box.append(el('strong','',(incoming?'Received':['sent','accepted','completed'].includes(t.status)?'Sent':t.status==='queued'?'Queued':['not_sent','failed','blocked','refused','unavailable','disconnected','expired'].includes(t.status)?'Not sent':'Outcome unconfirmed')+' · '+(t.kind==='call'?'Call':'Email')),el('time','',t.time&&!isNaN(new Date(t.time))?new Date(t.time).toLocaleString():''),el('p','',r.source==='turo'?String(t.text||t.message||'').replace(/\b\d{1,6}\s+[A-Za-z0-9 .'-]+\s(?:Street|St|Avenue|Ave|Road|Rd|Drive|Dr|Lane|Ln|Court|Ct|Boulevard|Blvd|Way)\b[^\n]*/gi,'[address hidden]'):t.text||t.message||''));
+   if(t.kind==='call'&&!t.transcript)box.append(el('p','','No transcript yet.'));history.append(box);
+  }
+ }
+ paintHistory(r.thread||r.messages||[]);if(r.queue==='jobs'||r.applicationSource)parent.append(resume);parent.append(reply,history);lock();
+ if(!r.readOnly&&r.source!=='turo'&&r.source!=='mail'){
+  const work=el('details','sd-person-work');work.append(el('summary','','Notes and next step'));
+  const note=el('textarea');note.setAttribute('aria-label','Private note');note.value=r.note||'';
+  const state=el('select');state.setAttribute('aria-label','Next step');for(const value of ['New','Call next','Waiting','Done']){const option=el('option','',value);option.value=value;state.append(option);}state.value=r.status||'New';
+  const saved=el('p','sd-feedback');const save=button('Save note and next step',async()=>{save.disabled=true;try{await api('queue-work',{id:r.id,note:note.value,status:state.value});r.note=note.value;r.status=state.value;saved.textContent='Saved. Nothing sent.';}catch{saved.textContent='Not saved. Try again.';}finally{save.disabled=false;}});
+  const text=button('Text their phone',()=>act('sms'));text.disabled=!!data?.workUnavailable||!!data?.unavailable;work.append(note,state,save,text,saved);if(data?.workUnavailable||data?.unavailable){note.disabled=true;state.disabled=true;save.disabled=true;}parent.append(work);
+ }
+
+ const query=new URLSearchParams(personInput(r));
+ async function refresh(historyOnly=false){try{
+  const result=await api('smart-person?'+query+(historyOnly?'&history=1':''));
+  if(!parent.isConnected||parent.dataset.personId!==r.id)return;
+  paintResume(result.resume);phone=!!result.phoneAvailable;phoneStatus.textContent=phone?'Your phone rings first, then theirs.':'No phone number in this record.';paintHistory(result.thread||[]);
+  if(!historyOnly){personDrafts.set(key,result.draft||'');if(!personEdits.has(key)&&!field.value)field.value=result.draft||'';field.placeholder=result.draft?'Write your reply.':'Draft unavailable. Write your reply.';draftStatus.textContent=result.draft?'Review and edit before sending.':'Draft unavailable. Write your reply.';lock();}
+ }catch{if(!parent.isConnected||parent.dataset.personId!==r.id)return;if(!historyOnly){field.placeholder='Draft unavailable. Write your reply.';draftStatus.textContent='Draft unavailable. Write your reply.';}else feedback.textContent='New activity could not be checked. Showing saved history.';}}
+ void refresh();const interval=setInterval(()=>{if(!parent.isConnected||parent.dataset.personId!==r.id){clearInterval(interval);return;}if(!document.hidden)void refresh(true);},15000);
+}
+
+function renderFleet(page){
+ if(company!=='AniDeeBee'){page.append(el('p','','Choose AniDeeBee to see its fleet.'));return;}
+ const fleet=data?.queues?.turo;
+ sourceNotice(page,fleet);
+ const grid=el('div','sd-fleet-grid');page.append(grid);
+ for(const car of fleet?.rows||[]){
+  const c=card(car.label);c.classList.add('sd-fleet-car');
+  if(car.trip){c.append(el('h2','',car.trip.guest),el('p','',car.trip.vehicle),el('p','','Plate '+(car.trip.plate||'not supplied')),el('p','','Trip '+car.trip.id),el('p','','Ends '+car.trip.endLabel));}
+  else c.append(el('p','','No current trip'));
+  grid.append(c);
+ }
+ if(!fleet?.rows?.length)page.append(el('p','','Fleet records are temporarily unavailable.'));
+ page.append(el('h2','','Turo inbox'));
+ const layout=el('div','sd-fleet-inbox'),list=el('section'),thread=el('section','sd-card sd-fleet-thread');list.setAttribute('aria-label','Turo inbox threads');thread.setAttribute('aria-label','Turo thread');layout.append(list,thread);page.append(layout);
+ thread.append(el('p','','Choose a guest to read the saved thread.'));
+ let count=14;
+ const threads=[...(fleet?.threads||[])].sort((a,b)=>(b.when?Date.parse(b.when):0)-(a.when?Date.parse(a.when):0));
+ function paint(){list.replaceChildren();for(const row of threads.slice(0,count)){
+  const b=button('',()=>{thread.replaceChildren(el('h3','',row.name),el('p','','Guest conversation'));
+   browserReply(thread,'turo',row);thread.scrollIntoView?.({block:'start'});
+  },'sd-row');b.dataset.threadId=row.id;b.append(el('strong','',row.name),el('span','','Guest conversation'));list.append(b);
+ }if(count<threads.length)list.append(button('More threads',()=>{count+=14;paint();}));}paint();
+}
+function browserReply(parent,source,row){
+ if(company==='AniDeeBee'){personCard(parent,{...row,source,label:row.label||row.name});return;}
+ parent.dataset.threadId=row.browserThreadId||row.id;parent.dataset.threadUrl=row.threadUrl||'';
+ for(const message of row.messages||[])parent.append(el('p','sd-mail-body',message.text||message.body||''));
+ const form=el('form','sd-fleet-reply'),field=el('textarea'),send=el('button','sd-fleet-send','Send'),notice=el('p','sd-muted','Nothing is sent until you press Send.');
+ field.setAttribute('aria-label','Reply');field.maxLength=5000;send.type='submit';send.disabled=true;
+ let submitted=false;const requestId=crypto.randomUUID();
+ field.oninput=()=>{send.disabled=submitted||!field.value.trim();};
+ form.append(field,send,notice);parent.append(form);
+ form.onsubmit=async event=>{event.preventDefault();if(submitted||!field.value.trim())return;submitted=true;send.disabled=true;field.readOnly=true;notice.textContent='Sending…';
+ try{const result=await api('browser-reply',{company:'AniDeeBee',source,id:row.browserThreadId||row.id,text:field.value,requestId});notice.dataset.status=result.status||'unknown';notice.textContent=result.status==='sent'?'Sent':result.status==='not_sent'?'Not sent. '+(result.message||'The source conversation is unavailable in Unified Support.'):'Send could not be confirmed. Do not resend.';if(result.status==='sent')field.value='';}
+ catch{notice.textContent='Send could not be confirmed. Do not resend.';}
+ };
+}
+async function openFleetMail(thread,row){
+ try{const result=await api('company-mail?company=AniDeeBee&conversation='+encodeURIComponent(row.conversationId));if(!thread.isConnected)return;if(result.unavailable)throw Error();
+  for(const m of result.messages||[])thread.append(mailBody(m));
+  const form=el('form','sd-fleet-reply'),field=el('textarea'),send=el('button','sd-fleet-send','Send'),notice=el('p');field.setAttribute('aria-label','Reply');send.type='submit';send.disabled=true;field.oninput=()=>{send.disabled=!field.value.trim();};
+  form.append(field,send,notice);thread.append(form);form.onsubmit=async e=>{e.preventDefault();send.disabled=true;try{const r=await api('company-reply',{company:'AniDeeBee',conversation:row.conversationId,text:field.value});notice.textContent=r.message||'Reply outcome is unconfirmed. Do not resend.';if(r.status==='accepted')field.value='';}catch{notice.textContent='Reply outcome is unconfirmed. Do not resend.';}};
+ }catch{thread.append(el('p','','Mail is unavailable. The saved thread stays here.'));}
+}
 function mailBody(message){
  const body=el('div','sd-mail-body');
  if(!message.html){body.textContent=message.text||'Message with attachment';return body;}
@@ -83,10 +274,70 @@ function mailBody(message){
  for(const child of parsed.body.childNodes)copy(child,body);
  return body;
 }
+const mailboxEdits=new Map();
+const callPending=new Set(),callResults=new Map();
+const callCopy=status=>status==='queued'?'Your phone should ring now. Answer it, then their phone rings.':status==='connect'?'Connect the office phone once. Then press Call again.':['refused','disconnected','unavailable','expired','blocked'].includes(status)?'No call was placed. Please try Call again.':'The call outcome is not confirmed. Do not press Call again yet.';
+function showVoiceConnect(){const box=document.querySelector('#kioskx-voice-connect');if(box){box.dataset.deskRequested='true';host.querySelector('.sd-rail').insertBefore(box,host.querySelector('.sd-assistant'));box.hidden=false;}}
+async function callPerson(r){
+ if(!r.phone||callPending.has(r.id))return null;
+ callPending.add(r.id);
+ try{
+  const result=await api('call',{leadId:r.id,requestId:crypto.randomUUID()});
+  if(result.thread){r.thread=[...(r.thread||[]).filter(t=>['inbound','incoming'].includes(t.direction)||t.id&&!t.key),...result.thread].sort((a,b)=>new Date(a.time)-new Date(b.time));const stored=data?.queues?.[r.queue]?.rows.find(x=>x.id===r.id);if(stored)stored.thread=r.thread;}
+  callResults.set(r.id,result.status);return result;
+ }catch(error){callResults.set(r.id,'unknown');throw error;}
+ finally{callPending.delete(r.id);for(const b of host?.querySelectorAll('.sd-person-call')||[]){if(b.dataset.leadId===r.id){b.disabled=false;const feedback=b.parentElement.querySelector('.sd-feedback');feedback.textContent=callCopy(callResults.get(r.id));}}}
+}
+function renderCalls(page){
+ if(company==='AniDeeBee'){
+  page.append(el('p','sd-call-instruction','Open the person’s request to call from their Jobs, Cleaning, Cars or Turo card. Nothing is called here.'));
+  const list=el('section','sd-call-owners');page.append(list);
+  const paint=()=>{if(!page.isConnected){smartLists.delete(paint);return;}list.replaceChildren();
+   for(const q of ['jobs','cleaning','cars']){const group=card(names[q]);for(const r of rows().filter(matchesCompany).filter(r=>r.queue===q&&statusOf(r)!=='Done'))group.append(rowButton(r,'Open '+names[q]));if(!group.querySelector('.sd-row'))group.append(el('p','','No open requests.'));list.append(group);}
+   list.append(button('Open Turo guest threads',()=>navigate('turo')));
+  };smartLists.add(paint);paint();return;
+ }
+ const asked=company;
+ applicationNotice(page);
+ page.classList.add('sd-call-page');
+ page.append(el('p','sd-call-instruction','Press Call. Your phone rings. Answer it, and their phone rings from the office line.'),el('p','sd-muted',"Customers see this company's office number."));
+ const people=el('section','sd-call-people');people.setAttribute('aria-label','People to call');page.append(people);
+ const list=rows().filter(r=>matchesCompany(r)&&(r.applicationSource==='indeed'||statusOf(r)!=='Done')&&(r.queue==='jobs'||(!r.readOnly&&r.phone)));
+ const failed=!data||data.unavailable||data.workUnavailable||queueKeys.some(k=>matchesCompany({queue:k})&&data.queues?.[k]?.unavailable);
+ if(failed)people.append(el('p','sd-card',data?'People could not be loaded. Refresh to try again.':'Loading people…'));
+ else if(!list.length)people.append(el('p','sd-card','No one to call right now.'));
+ for(const r of list){
+  const row=el('article','sd-card sd-call-person'),copy=el('div','sd-call-person-copy');
+  copy.append(el('h2','',r.queue==='kiosk'?'Kiosk inquiry':displayName(r)),el('p','',clean(r.summary||r.message||names[r.queue]+' request').slice(0,180)));
+  const feedback=el('p','sd-feedback');feedback.setAttribute('role','status');
+  const call=button('Call',async()=>{
+   if(callPending.has(r.id)||call.disabled)return;
+   call.disabled=true;feedback.textContent='Requesting your call…';
+   try{const result=await callPerson(r);if(!result)return;feedback.dataset.status=result.status||'';feedback.textContent=callCopy(result.status);if(result.status==='connect'&&page.isConnected&&company===asked)showVoiceConnect();}
+   catch{feedback.dataset.status='unknown';feedback.textContent=callCopy('unknown');}
+   finally{call.disabled=failed;}
+  },'sd-person-call');
+  call.dataset.leadId=r.id;call.disabled=failed||!r.phone||callPending.has(r.id);if(!r.phone)copy.append(el('p','sd-muted','No phone number on this application.'));if(callResults.has(r.id))feedback.textContent=callCopy(callResults.get(r.id));row.append(copy,call,feedback);people.append(row);
+ }
+ const recent=card('RECENT CALLS','Loading recent calls…');page.append(recent);
+ api('quo?company='+encodeURIComponent(asked)).then(result=>{
+  if(!page.isConnected||company!==asked)return;
+  recent.replaceChildren(el('h3','','RECENT CALLS'));
+  if(result?.connected!==true){recent.append(el('p','','Recent calls are unavailable. You can still call a person above.'));return;}
+  if(!result.calls?.length)recent.append(el('p','','No recent calls.'));
+  for(const item of result.calls||[]){
+   const when=item.at&&!isNaN(new Date(item.at))?new Date(item.at).toLocaleString([],{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}):'';
+   const seconds=Math.max(0,Number(item.duration)||0),status=String(item.status||'').toLowerCase();
+   const outcome=['answered','completed'].includes(status)?'answered':status==='missed'?'missed':['no-answer','no_answer','unanswered','busy','failed','canceled','cancelled'].includes(status)?'no answer':'outcome not confirmed';
+   recent.append(el('p','',`${item.direction==='incoming'?'They called':'You called'} · ${outcome}${seconds?' · '+Math.floor(seconds/60)+'m '+seconds%60+'s':''}${when?' · '+when:''}`));
+  }
+ }).catch(()=>{if(page.isConnected)recent.replaceChildren(el('h3','','RECENT CALLS'),el('p','','Recent calls are unavailable. You can still call a person above.'));});
+}
+
 function renderEmbed(){
  const asked=company,page=el('section','sd-embed sd-mail'),header=el('header','sd-embed-header');
  header.append(el('h1','',queue==='inbox'?company+' · '+desks[company].mail:'Call · '+company));page.append(header);host.append(page);
- if(queue==='call'){const status=el('p','sd-card','Opening Voice Studio…');page.append(status,el('p','sd-card','Quo key is not stored yet.'));api('voice-session').then(result=>{if(!page.isConnected)return;if(result.url!=='/kioskx-hired-desk/voice/')throw Error();const frame=el('iframe','sd-studio');frame.title='Voice Studio';frame.src=result.url;frame.allow='microphone';frame.style.cssText='width:100%;height:75vh;border:0';status.replaceWith(frame);}).catch(()=>{status.textContent='Voice Studio could not be reached. Call +1 (773) 681-2818.';});return;}
+ if(queue==='call'){renderCalls(page);return;}
  const layout=el('div','sd-mail-layout'),list=el('section','sd-mail-list'),thread=el('section','sd-mail-thread');list.setAttribute('aria-label','Company conversations');thread.setAttribute('aria-label','Mail thread');layout.append(list,thread);page.append(layout);
  const live=()=>page.isConnected&&company===asked;let pageNo=1,selected=null,threadVersion=0,listBusy=false,pollThread=null;
  const notice=el('p','sd-mail-sync');notice.setAttribute('role','status');notice.hidden=true;header.append(notice);
@@ -102,20 +353,20 @@ function renderEmbed(){
    list.querySelector('.sd-mail-empty')?.remove();list.querySelector('.sd-mail-paging')?.remove();
    for(const [id,b]of existing)if(!result.conversations.some(r=>String(r.id)===id))b.remove();
    notice.hidden=true;if(!result.conversations.length)list.append(el('p','sd-mail-empty',pageNo===1?'No mail for '+asked+' yet.':'No more conversations.'));
-   for(const row of result.conversations){let b=existing.get(String(row.id));if(!b){b=button('',()=>openThread(row),'sd-mail-row');b.dataset.id=String(row.id);}b.replaceChildren(el('strong','',row.name),el('span','',row.preview),el('small','',row.status));list.append(b);}
+   for(const row of result.conversations){let b=existing.get(String(row.id));if(!b){b=button('',()=>openThread(row),'sd-mail-row');b.dataset.id=String(row.id);}b.replaceChildren(el('strong','',row.subject||'(No subject)'),el('span','sd-mail-sender',row.sender||row.name),el('span','',row.preview),el('small','',row.status));list.append(b);}
    const paging=el('div','sd-mail-paging');const prev=button('Previous',()=>{pageNo--;loadList();}),next=button('Next',()=>{pageNo++;loadList();});prev.disabled=pageNo===1;next.disabled=!result.more;paging.append(prev,el('span','','Page '+pageNo),next,button('Refresh',()=>{pageNo=1;loadList(true);}));list.append(paging);
   }catch{if(live()){list.querySelector('.sd-mail-loading')?.remove();notice.textContent='Mail could not be checked. Showing stored mail.';notice.hidden=false;}}finally{listBusy=false;}
  }
  async function openThread(row){
-  const version=++threadVersion;pollThread=null;selected=row.id;thread.replaceChildren(el('p','sd-muted','Loading conversation…'));
+  host.classList.add('sd-reading-mail');const back=button('Back to Inbox',()=>{host.classList.remove('sd-reading-mail');selected=null;pollThread=null;threadVersion++;emptyThread();host.scrollTop=0;},'sd-mail-back');const version=++threadVersion;pollThread=null;selected=row.id;host.scrollTop=0;thread.replaceChildren(el('p','sd-muted','Loading conversation…'));
   try{const result=await api('company-mail?company='+encodeURIComponent(asked)+'&conversation='+row.id);if(!live()||version!==threadVersion)return;
    if(result.unavailable){error(thread);return;}
-   thread.replaceChildren(el('h2','',row.name));const messages=el('div','sd-mail-messages');messages.setAttribute('aria-label','Messages');thread.append(messages);
+   thread.replaceChildren(back,el('h2','',row.subject||'(No subject)'),el('p','sd-mail-sender',row.sender||row.name));const messages=el('div','sd-mail-messages');messages.setAttribute('aria-label','Messages');thread.append(messages);
    const seen=new Set();const paint=(items,prepend=false)=>{const fragment=document.createDocumentFragment();for(const m of items){if(m.id&&seen.has(m.id))continue;if(m.id)seen.add(m.id);if(m.id&&m.direction==='sent')for(const pending of messages.querySelectorAll('[data-pending-text]'))if(pending.dataset.pendingText===(m.text||''))pending.remove();const box=el('article','sd-mail-message '+m.direction);if(!m.id&&m.direction==='sent')box.dataset.pendingText=m.text||'';box.append(el('small','',m.direction==='received'?'Customer':'Reply · '+asked),mailBody(m));if(m.attachments)box.append(el('p','sd-muted',m.attachments+' attachment(s) in the original message.'));fragment.append(box);}prepend?messages.prepend(fragment):messages.append(fragment);};paint(result.messages||[]);
    let older=result.older;const earlier=button('Earlier messages',async()=>{earlier.disabled=true;try{const r=await api('company-mail?company='+encodeURIComponent(asked)+'&conversation='+row.id+'&before='+older);if(!live()||version!==threadVersion)return;if(r.unavailable)throw Error();paint(r.messages||[],true);older=r.older;earlier.hidden=!older;}catch{earlier.textContent='Retry earlier messages';}finally{earlier.disabled=false;}});earlier.hidden=!older;thread.insertBefore(earlier,messages);
-   const form=el('form','sd-mail-reply'),label=el('label','','Reply from '+desks[asked].mail),field=el('textarea');field.setAttribute('aria-label','Mailbox reply');field.placeholder='Write your reply';field.maxLength=10000;label.append(field);
-   const status=el('p','sd-feedback');status.setAttribute('role','status');const send=button('Send');send.type='submit';send.disabled=true;let submitted=false;field.oninput=()=>{send.disabled=submitted||!field.value.trim();};
-   form.onsubmit=async event=>{event.preventDefault();if(submitted||!field.value.trim()||!live()||selected!==row.id)return;submitted=true;send.disabled=true;field.disabled=true;status.textContent='Submitting reply…';try{const r=await api('company-reply',{company:asked,conversation:row.id,text:field.value});if(!live()||version!==threadVersion)return;status.textContent=r.message||'Delivery is unconfirmed. Do not resend.';if(r.status==='accepted'){paint([{direction:'sent',text:field.value}]);field.value='';submitted=false;field.disabled=false;}if(['blocked','unavailable','failed'].includes(r.status)){submitted=false;field.disabled=false;send.disabled=!field.value.trim();}}catch{if(live())status.textContent='Delivery is unconfirmed. Do not resend.';}};
+   const form=el('form','sd-mail-reply'),label=el('label','','Reply from '+desks[asked].mail),field=el('textarea');field.setAttribute('aria-label','Mailbox reply');field.placeholder='Write your reply';field.maxLength=10000;const editKey=asked+':'+row.id;field.value=mailboxEdits.get(editKey)||'';label.append(field);
+   const status=el('p','sd-feedback');status.setAttribute('role','status');const send=button('Send',undefined,'sd-fleet-send');send.type='submit';send.disabled=!field.value.trim();let submitted=false;field.oninput=()=>{mailboxEdits.set(editKey,field.value);send.disabled=submitted||!field.value.trim();};
+   form.onsubmit=async event=>{event.preventDefault();if(submitted||!field.value.trim()||!live()||selected!==row.id)return;submitted=true;send.disabled=true;field.disabled=true;status.textContent='Submitting reply…';try{const r=await api('company-reply',{company:asked,conversation:row.id,text:field.value});if(!live()||version!==threadVersion)return;status.textContent=r.message||'Delivery is unconfirmed. Do not resend.';if(r.status==='accepted'){paint([{direction:'sent',text:field.value}]);mailboxEdits.delete(editKey);field.value='';submitted=false;field.disabled=false;}if(['blocked','unavailable','failed'].includes(r.status)){submitted=false;field.disabled=false;send.disabled=!field.value.trim();}}catch{if(live())status.textContent='Delivery is unconfirmed. Do not resend.';}};
    form.append(label,send,status);thread.append(form);
    pollThread=async()=>{const r=await api('company-mail?company='+encodeURIComponent(asked)+'&conversation='+row.id);if(live()&&version===threadVersion&&!r.unavailable)paint(r.messages||[]);};
   }catch{if(live()&&version===threadVersion)error(thread);}
@@ -124,8 +375,8 @@ function renderEmbed(){
  const timer=setInterval(async()=>{if(!live()){clearInterval(timer);return;}if(document.hidden)return;await loadList();try{await pollThread?.();}catch{}},15000);
 }
 function pageHeader(page){const header=el('header','sd-page-header');header.append(page.querySelector('h1'));const subtitle=page.querySelector('.sd-subtitle');if(subtitle)header.append(subtitle);const tools=el('div','sd-header-tools');if(queue==='knowledge'){const search=el('input','sd-article-search');search.placeholder='Search articles';search.setAttribute('aria-label','Search articles');search.oninput=()=>{for(const row of page.querySelectorAll('.sd-article'))row.hidden=!row.textContent.toLowerCase().includes(search.value.toLowerCase());};tools.append(search);}if(queue==='knowledge'||queue==='companies'){const action=page.querySelector(':scope > button');if(action)tools.append(action);}if(queue==='insights'){const periods=page.querySelector('.sd-pills');if(periods)tools.append(periods);}header.append(tools);page.prepend(header);}
-function renderToday(page,all){if(company==='AniDeeBee')crewOverview(page);const a=activity().filter(t=>matchesCompany(t.row));page.append(el('p','sd-subtitle',new Date().toLocaleDateString([],{weekday:'long'})+' · '+a.length+' actions sent'),kpis([['Emails sent',a.filter(t=>t.kind==='email').length],['Calls placed',a.filter(t=>t.kind==='call').length],['Texts sent',a.filter(t=>t.kind==='sms').length]]),companyPills());const log=card('TODAY');if(unavailable())log.append(el('p','','Today: activity unavailable.'));else if(!a.length)log.append(el('p','','Today: nothing sent.'));for(const t of a){const line=el('div','sd-log-row');line.append(el('time','',time(t.time)),chip(companyOf(t.row)),el('span','',names[t.row.queue]+' — '+displayName(t.row)),chip(t.kind==='email'?'Email sent':t.kind==='sms'?'Text sent':t.status==='queued'?'Call queued':'Call placed'));log.append(line);}page.append(log,el('p','sd-muted','No email addresses or phone numbers are shown in Today.'));const todo=card('STILL TO DO TODAY');for(const r of all.filter(r=>['New','Call next'].includes(statusOf(r))))todo.append(rowButton(r));if(!todo.querySelector('.sd-row'))todo.append(el('p','','No requests need a first contact or call.'));todo.append(button('Open Queues',()=>navigate('queues')));const aside=el('aside','sd-today-aside');aside.append(todo,legend());page.append(aside);}
-function renderQueues(page,all){page.append(el('p','sd-subtitle','Pick a queue to work. Counts come from real requests.'),el('h2','','Connected queues'));const grid=el('div','sd-grid');for(const [q,description]of [['cleaning','Deep cleaning requests'],['cars','Car rental requests'],['jobs','Job applications'],['kiosk','Questions about machines']]){if(!matchesCompany({queue:q}))continue;const c=card(names[q],description);c.append(el('p','sd-muted',q==='kiosk'?'KioskX':'AniDeeBee'));for(const status of ['New','Call next','Waiting','Done']){const n=all.filter(r=>r.queue===q&&statusOf(r)===status).length;if(n)c.append(chip(n+' '+status));}if(!all.some(r=>r.queue===q))c.append(chip('All clear'));if(data?.queues?.[q]?.unavailable)c.append(el('p','','This queue is unavailable. Try refreshing.'));c.append(button('Open queue →',()=>navigate(q)));grid.append(c);}page.append(grid);page.append(el('p','sd-muted','Status chips do not send anything. Nothing is sent until an agent presses Email, Call or Text.'));}
+function renderToday(page,all){applicationNotice(page);if(company==='AniDeeBee')crewOverview(page);const a=activity().filter(t=>matchesCompany(t.row));page.append(el('p','sd-subtitle',new Date().toLocaleDateString([],{weekday:'long'})+' · '+a.length+' actions sent'),kpis([['Emails sent',a.filter(t=>t.kind==='email').length],['Calls placed',a.filter(t=>t.kind==='call').length],['Texts sent',a.filter(t=>t.kind==='sms').length]]),companyPills());const log=card('TODAY');if(unavailable())log.append(el('p','','Today: activity unavailable.'));else if(!a.length)log.append(el('p','','Today: nothing sent.'));for(const t of a){const line=el('div','sd-log-row');line.append(el('time','',time(t.time)),chip(companyOf(t.row)),el('span','',names[t.row.queue]+' — '+displayName(t.row)),chip(t.kind==='email'?'Email sent':t.kind==='sms'?'Text sent':t.status==='queued'?'Call queued':'Call placed'));log.append(line);}page.append(log,el('p','sd-muted','No email addresses or phone numbers are shown in Today.'));const todo=card('STILL TO DO TODAY');if(company==='AniDeeBee')todo.append(el('p','sd-jobs-count',`${all.filter(r=>r.queue==='jobs'&&statusOf(r)!=='Done').length} open job applications`));for(const r of all.filter(r=>['New','Call next'].includes(statusOf(r))))todo.append(rowButton(r));if(!todo.querySelector('.sd-row'))todo.append(el('p','','No requests need a first contact or call.'));todo.append(button('Open Queues',()=>navigate('queues')));const aside=el('aside','sd-today-aside');aside.append(todo,legend());page.append(aside);}
+function renderQueues(page,all){applicationNotice(page);page.append(el('p','sd-subtitle','Pick a queue to work. Counts come from real requests.'),el('h2','','Connected queues'));const grid=el('div','sd-grid');for(const [q,description]of [['cleaning','Deep cleaning requests'],['cars','Car rental requests'],['jobs','Job applications'],['kiosk','Questions about machines']]){if(!matchesCompany({queue:q}))continue;const c=card(names[q],description);c.append(el('p','sd-muted',q==='kiosk'?'KioskX':'AniDeeBee'));for(const status of ['New','Call next','Waiting','Done']){const n=all.filter(r=>r.queue===q&&statusOf(r)===status).length;if(n)c.append(chip(n+' '+status));}if(!all.some(r=>r.queue===q))c.append(chip('All clear'));if(data?.queues?.[q]?.unavailable)c.append(el('p','','This queue is unavailable. Try refreshing.'));c.append(button('Open queue →',()=>navigate(q)));grid.append(c);}page.append(grid);page.append(el('p','sd-muted','Status chips do not send anything. Nothing is sent until an agent presses Email, Call or Text.'));}
 const articles=[
 ['Deep cleaning: what is included','Cleaning','Read the service, bedrooms, bathrooms, size, ZIP, date and laundry notes on the request. Confirm the requested scope before quoting. Do not promise extra services that the request does not include.'],
 ['Car for work: how a one-week request works','Cars','A request does not reserve a car. Read the vehicle, purpose, location and duration, then confirm availability and the details with the customer.'],
@@ -134,11 +385,12 @@ const articles=[
 ['Appointment reminder fills the reply and does not send','Cleaning','Enter the appointment time and press Appointment reminder. Review the date on the request and the reply, then press Email or Text to send it.'],
 ['MVP scoping call: what to ask','Quotes','This article is not written yet.'],['Standard quote turnaround','Quotes','This article is not written yet.']];
 function articleLink(i){return location.origin+'/welcome#desk-article='+i;}
-function insertArticle(i,feedback){const r=rows().find(r=>r.id===(open||lastRequest));if(!r||!matchesCompany(r)){feedback.textContent='Open a request in Queues first, then insert a link.';return;}if(unavailable()||data.queues?.[r.queue]?.unavailable){feedback.textContent='This queue is unavailable. Try refreshing.';return;}remember();drafts[r.id]=[drafts[r.id]??r.draft??'',articles[i][0]+': '+articleLink(i)].filter(Boolean).join('\n\n');navigate(r.queue,r.id);}
+function insertArticle(i,feedback){const r=rows().find(r=>r.id===(open||lastRequest));if(!r||!matchesCompany(r)){feedback.textContent='Open a request in Queues first, then insert a link.';return;}if(unavailable()||data.queues?.[r.queue]?.unavailable){feedback.textContent='This queue is unavailable. Try refreshing.';return;}remember();drafts[r.id]=[drafts[r.id]??r.draft??'',articles[i][0]+': '+articleLink(i)].filter(Boolean).join('\n\n');if(company==='AniDeeBee')personEdits.set(personKey(r),drafts[r.id]);navigate(r.queue,r.id);}
 function renderKnowledge(page){page.append(el('p','sd-subtitle','Answers agents can link in a reply'));const notice=el('p','sd-feedback');notice.setAttribute('role','status');page.append(button('New article',()=>{notice.textContent='A new article is not saved from this desk yet.';}),notice);const grid=el('div','sd-knowledge'),categories=card('CATEGORIES');for(const c of ['All articles','Getting started','Cleaning','Cars','Jobs','Kiosks','Quotes','Policies']){const b=button(c,()=>{category=c;render();});b.setAttribute('aria-pressed',String(c===category));categories.append(b);}const list=el('div','sd-article-list');list.append(pills(['All',...companies],articleCompany,v=>{articleCompany=v;render();}));let count=0;articles.forEach((a,i)=>{if((category==='All articles'||a[1]===category)&&(articleCompany==='All'||articleCompany===(i===3?'KioskX':i<5?'AniDeeBee':i<7?'ToBa Tech':'Kiosk X'))){count++;const b=button('',()=>{article=i;render();},'sd-article');b.setAttribute('aria-pressed',String(article===i));b.append(el('strong','',a[0]),el('p','sd-muted',a[1]));list.append(b);}});if(!count)list.append(el('p','','No articles in this category.'));const preview=card('PREVIEW');preview.append(chip(article===3?'KioskX':article<5?'AniDeeBee':article<7?'ToBa Tech':'Kiosk X'),el('h2','',articles[article][0]),el('p','',articles[article][2]));const feedback=el('p','sd-feedback');preview.append(button('Insert link in reply',()=>insertArticle(article,feedback)),el('p','sd-muted','Adds a link to the reply box. Does not send.'),feedback);grid.append(categories,list,preview);page.append(grid);}
 function renderInsights(page,all){page.append(pills(['Today','7 days','30 days'],period===1?'Today':period+' days',v=>{period=v==='Today'?1:parseInt(v);render();}));const since=new Date();since.setHours(0,0,0,0);since.setDate(since.getDate()-period+1);const recent=all.filter(r=>r.when&&new Date(r.when)>=since),events=all.flatMap(r=>(r.thread||[]).filter(t=>new Date(t.time)>=since&&((['email','sms'].includes(t.kind)&&t.status==='sent')||(t.kind==='call'&&['sent','completed','queued'].includes(t.status)))));page.append(el('p','sd-subtitle',`Last ${period} ${period===1?'day':'days'} · ${company==='All'?'All companies':company}`),kpis([['Open requests',all.filter(r=>statusOf(r)!=='Done').length],['Avg first reply','—'],['Resolved',all.filter(r=>statusOf(r)==='Done').length],['Need attention',all.filter(r=>['Call next','Waiting'].includes(statusOf(r))).length]]));const grid=el('div','sd-grid'),byCompany=card('REQUESTS BY COMPANY'),byChannel=card('BY CHANNEL');for(const c of companies){const n=recent.filter(r=>deskOf(r)===c).length,line=el('div','sd-bar-row');line.append(el('span','',c),el('strong','',n));const bar=el('div','sd-bar');bar.style.width=(n/Math.max(1,recent.length)*100)+'%';line.append(bar);byCompany.append(line);}for(const [label,kind]of [['Email','email'],['Phone','call'],['Text','sms'],['Web form',null]]){const line=el('p','sd-log-row');line.append(el('span','',label),el('strong','',kind?events.filter(t=>t.kind===kind).length:recent.length));byChannel.append(line);}grid.append(byCompany,byChannel);page.append(grid);const needs=card('NEEDS ATTENTION');for(const r of all.filter(r=>['Call next','Waiting'].includes(statusOf(r))))needs.append(rowButton(r,'Open'));if(!needs.querySelector('.sd-row'))needs.append(el('p','','No requests need attention.'));page.append(needs);}
 
 function renderEngagement(page){
+
  const asked=company,live=()=>page.isConnected&&company===asked;
  page.append(el('p','sd-subtitle',asked+' · '+appIds[asked]));
  const status=el('p','sd-feedback','Loading company tools…');page.append(status);
@@ -284,8 +536,8 @@ function crewCard(r){
  form.onsubmit=async e=>{e.preventDefault();submit.disabled=true;feedback.textContent='Saving…';try{const d=await api('crew-assign',{id:r.id,role:role.value,...Object.fromEntries(Object.entries(inputs).map(([k,v])=>[k,v.value]))});feedback.textContent=d.ok?'Assigned. No message was sent.':d.message||'Assignment was not saved.';if(d.ok)await load();}catch{feedback.textContent='Assignment was not saved. Try again.';}finally{submit.disabled=false;}};
  c.append(status,button('Refresh worker status',load),form,feedback);if(unavailable()){for(const input of c.querySelectorAll('input,select,button'))input.disabled=true;status.textContent='Request unavailable. Refresh the queue.';}else load();return c;
 }
-function detail(r){const privateKiosk=r.queue==='kiosk',safe=v=>privateKiosk?clean(v):String(v??'');const center=el('section','sd-center');const voiceAnchor=el('div','hired-actions');voiceAnchor.hidden=true;center.append(voiceAnchor);center.setAttribute('aria-label','Open request');const heading=el('header','sd-heading');heading.append(el('h2','',displayName(r)),chip(r.status||'New'),el('span','sd-chip',queue==='inbox'?companyOf(r):names[r.queue]));center.append(heading);if(['cleaning','cars'].includes(r.queue))center.append(crewCard(r));
-if(r.resume)center.append(resumeLink(r));if(r.readOnly){center.append(fields('APPLICATION',r.fields||[]),fields('CONTACT',[['Email',r.email||'Not provided'],['Phone',r.phone||'Not provided']]));host.append(center);return;}
+function detail(r){if(company==='AniDeeBee'){const center=el('section','sd-center'),person=el('section');host.append(center);center.append(button('Back to '+names[r.queue],()=>navigate(r.queue),'sd-person-back'),person);personCard(person,r);host.scrollTop=0;if(['cleaning','cars'].includes(r.queue))center.append(crewCard(r));return;}const privateKiosk=r.queue==='kiosk',safe=v=>privateKiosk?clean(v):String(v??'');const center=el('section','sd-center');const voiceAnchor=el('div','hired-actions');voiceAnchor.hidden=true;center.append(voiceAnchor);center.setAttribute('aria-label','Open request');const heading=el('header','sd-heading');heading.append(el('h2','',displayName(r)),chip(r.status||'New'),el('span','sd-chip',queue==='inbox'?companyOf(r):names[r.queue]));center.append(heading);if(['cleaning','cars'].includes(r.queue))center.append(crewCard(r));
+if(r.applicationSource==='indeed')sourceNotice(center,data?.queues?.jobs?.snapshot);if(r.resume)center.append(resumeLink(r));if(r.readOnly){if(r.applicationSource==='indeed')browserReply(center,'indeed',r);center.append(fields('APPLICATION',r.fields||[]),fields('CONTACT',[['Email',r.email||'Not provided'],['Phone',r.phone||'Not provided']]));host.append(center);return;}
 const pairs=r.fields?.length?r.fields: [['Message',r.message||(privateKiosk?r.description:'')||'No message was submitted.']];center.append(fields('WHAT THEY ASKED',pairs.map(([k,v])=>[k,safe(v)])));if(r.queue==='cars')center.append(el('p','sd-muted','This request does not reserve a car.'));center.append(el('h3','sd-section-title','CONVERSATION'));
 const conversation=el('div','sd-conversation');const bubble=(label,text,cls='',stamp='')=>{const box=el('article','sd-card sd-message '+cls);const h=el('header');h.append(el('strong','',label),el('time','',time(stamp)));box.append(h,el('p','',safe(text)));return box;};
 const paintThread=()=>{conversation.replaceChildren();conversation.append(bubble(displayName(r),r.message||(privateKiosk?r.description:'')||'No message was submitted.','',r.when));for(const t of r.thread||[]){const incoming=['incoming','inbound'].includes(t.direction);const sent=t.status==='sent'||incoming;const label=incoming?(t.kind==='sms'?'Incoming · Text':'Incoming · Email'):t.kind==='email'?`You (${privateKiosk?'KioskX':'AniDeeBee'}) · Email`:t.kind==='sms'?'You · Text':t.kind==='note'?'Private note. Not sent.':'You · Call';conversation.append(bubble(label,(sent?t.text:[t.message,t.text].filter(Boolean).join('\n'))||t.message,incoming?'sd-incoming':t.kind==='note'?'sd-note':'sd-outgoing',t.time));}if(r.note)conversation.append(bubble('Private note. Not sent.',r.note,'sd-note'));};paintThread();center.append(conversation);for(const [kind,label]of [['email','mail'],['sms','texts']]){const connected=data?.queues?.[r.queue]?.[kind==='email'?'inboundMail':'inboundSms'];if(!connected)center.append(el('p','sd-muted',`Inbound ${label} ${kind==='sms'?'are':'is'} not in this desk yet.`));}
@@ -300,7 +552,7 @@ const saveButton=button('Save private note',async()=>{if(busy)return;busy=true;l
 for(const t of ['Reply','Private note','Email']){const b=button(t,()=>{if(tab==='Private note')note=field.value;else draft=field.value;tab=t;field.value=t==='Private note'?note:draft;field.setAttribute('aria-label',t);saveButton.hidden=t!=='Private note';for(const x of tabs.children)x.setAttribute('aria-selected',String(x===b));lock();});b.setAttribute('role','tab');b.setAttribute('aria-selected',String(t==='Reply'));tabs.append(b);controls.push(b);}tabs.setAttribute('role','tablist');composer.append(tabs,field,saveButton);controls.push(field,saveButton);
 if(r.queue==='cleaning'){const row=el('div','sd-reminder'),label=el('label','','Appointment time'),input=el('input');input.setAttribute('aria-label','Appointment time');input.placeholder='10:30 AM';input.maxLength=80;const b=button('Appointment reminder',()=>{const value=input.value.trim();if(tab==='Private note'){note=field.value;tab='Reply';saveButton.hidden=true;for(const x of tabs.children)x.setAttribute('aria-selected',String(x.textContent==='Reply'));}field.value=value?`You have an appointment tomorrow at ${value}.${r.appointmentDate?' Date on the request: '+r.appointmentDate+'.':''}`:'Add the appointment time, then use Appointment reminder.';draft=field.value;field.setAttribute('aria-label','Reply');lock();});label.append(input);row.append(label,b);composer.append(row,el('p','sd-muted','Fills the reply. Does not send.'));controls.push(input,b);}
 center.append(composer,el('p','sd-instruction','Read the request. Write the reply. Then Email, Call, or Text. Nothing is sent until you press one of those.'));
-const actions=el('div','sd-actions');const action=async kind=>{if(busy||blocked||tab==='Private note')return;busy=true;lock();try{if(kind!=='call')await save({draft:field.value});const result=await api(kind==='call'?'call':'queue-send',kind==='call'?{leadId:r.id,requestId:crypto.randomUUID()}:{id:r.id,kind});feedback.dataset.status=result.status||'';feedback.textContent=safe(result.message);r.thread=result.thread?[...(r.thread||[]).filter(t=>['inbound','incoming'].includes(t.direction)||t.id&&!t.key),...result.thread].sort((a,b)=>new Date(a.time)-new Date(b.time)):r.thread;data.queues[r.queue].rows.find(x=>x.id===r.id).thread=r.thread;paintThread();if(result.status==='connect'){const box=document.querySelector('#kioskx-voice-connect');if(box){box.dataset.deskRequested='true';host.querySelector('.sd-rail').insertBefore(box,host.querySelector('.sd-assistant'));box.hidden=false;}}}catch{feedback.dataset.status='error';feedback.textContent='Outcome is unconfirmed. Refresh before trying again.';}finally{busy=false;lock();}};
+const actions=el('div','sd-actions');const action=async kind=>{if(busy||blocked||tab==='Private note')return;busy=true;lock();try{if(kind!=='call')await save({draft:field.value});const result=kind==='call'?await callPerson(r):await api('queue-send',{id:r.id,kind});if(!result)return;feedback.dataset.status=result.status||'';feedback.textContent=kind==='call'?callCopy(result.status):safe(result.message);r.thread=result.thread?[...(r.thread||[]).filter(t=>['inbound','incoming'].includes(t.direction)||t.id&&!t.key),...result.thread].sort((a,b)=>new Date(a.time)-new Date(b.time)):r.thread;data.queues[r.queue].rows.find(x=>x.id===r.id).thread=r.thread;paintThread();if(result.status==='connect')showVoiceConnect();}catch{feedback.dataset.status='error';feedback.textContent=kind==='call'?callCopy('unknown'):'Outcome is unconfirmed. Refresh before trying again.';}finally{busy=false;lock();}};
 const send=button(privateKiosk?'Email as KioskX':'Email as AniDeeBee',()=>action('email'));const call=button('Call their phone',()=>action('call'));const sms=button('Text their phone',()=>action('sms'));actions.append(send,call,sms);center.append(actions,el('p','sd-muted sd-action-help','Email sends the reply above. Call rings their phone from the office Google Voice after this browser is connected. Text sends the reply to a US phone. A number in India is blocked.'),feedback);
 function lock(){for(const c of controls)c.disabled=blocked||busy;send.disabled=blocked||busy||tab==='Private note'||!data.mailEnabled;call.disabled=blocked||busy||tab==='Private note';sms.disabled=blocked||busy||tab==='Private note'||!data.smsEnabled;}lock();if(blocked){feedback.dataset.status='error';feedback.textContent='This queue is unavailable. Try refreshing.';}
 const side=el('aside','sd-right');if(queue==='inbox')side.append(card('AI ASSIST',safe(r.message||r.summary||'No message was submitted.')));const suggested=card('SUGGESTED ARTICLES'),idx=r.queue==='cleaning'?0:r.queue==='cars'?1:r.queue==='kiosk'?3:2,insertFeedback=el('p','sd-feedback');suggested.append(el('p','',articles[idx][0]));const insert=button('Insert link in reply',()=>insertArticle(idx,insertFeedback));insert.disabled=blocked||busy;suggested.append(insert,insertFeedback);controls.push(insert);if(queue==='inbox')side.append(suggested);side.append(fields('CONTACT',[['Email',privateKiosk?'Hidden':r.email||'No email'],['Phone',privateKiosk?'Hidden':r.phone||'No phone'],['Queue',names[r.queue]],['Received',r.when?new Date(r.when).toLocaleString():'Not recorded']],'sd-contact'));const ticket=el('section','sd-card sd-ticket');ticket.append(el('h3','','TICKET (ZAMMAD'));if(r.ticket&&typeof r.ticket==='object'){ticket.append(fields('',Object.entries(r.ticket).filter(([k,v])=>['title','state','priority','group'].includes(k)&&typeof v==='string').map(([k,v])=>[k,safe(v)])));}else ticket.append(el('p','','No ticket yet.'));side.append(ticket);host.append(center,side);
@@ -310,6 +562,18 @@ body .hired-desk > :not(#support-desk):not(#sd-workspaces){display:none!importan
 @media(max-width:1200px){#support-desk.sd-open{grid-template-columns:180px 280px minmax(330px,1fr)}#support-desk .sd-right{grid-column:3}#support-desk .sd-center{grid-row:1 / span 2}#support-desk .sd-right{display:none}#support-desk .sd-center{padding:20px} }
 @media(max-width:700px){#support-desk,#support-desk.sd-open{position:absolute;min-height:100vh;height:auto;grid-template-columns:1fr;overflow:auto}#support-desk .sd-rail{padding:12px}#support-desk nav{display:flex;flex-wrap:wrap;margin-top:10px}#support-desk .sd-list,#support-desk .sd-center,#support-desk .sd-right{grid-column:1;grid-row:auto;overflow:visible;display:block}#support-desk .sd-center{padding:16px}#support-desk dl{grid-template-columns:120px minmax(0,1fr)}#support-desk .sd-actions{flex-wrap:wrap}}
 
+#support-desk .sd-source-overview{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px;padding:16px;flex-shrink:0}#support-desk .sd-source-person{display:flex;justify-content:space-between;gap:12px;width:100%;text-align:left;margin:4px 0;padding:10px;border:1px solid #dce2ec;border-radius:8px;min-height:44px}#support-desk .sd-source-person strong{flex-shrink:0}#support-desk .sd-source-person span{overflow-wrap:anywhere}#support-desk .sd-mail:has(.sd-source-overview){overflow:auto}#support-desk .sd-mail:has(.sd-source-overview) .sd-mail-layout{min-height:480px;flex-shrink:0}@media(max-width:700px){#support-desk .sd-source-overview{grid-template-columns:1fr;padding:12px}}
+#support-desk .sd-fleet-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,240px),1fr));gap:16px;margin:20px 0}#support-desk .sd-fleet-inbox{display:grid;grid-template-columns:minmax(0,1fr) minmax(0,1fr);gap:16px;margin:16px 0}#support-desk .sd-fleet-inbox .sd-row{flex-wrap:wrap}#support-desk .sd-fleet-send{display:block;margin:12px 0 0 auto;font-weight:700;min-height:44px}#support-desk .sd-source-status{margin:12px 0} @media(max-width:700px){#support-desk .sd-fleet-inbox{grid-template-columns:1fr}}
+#support-desk .sd-call-page{overflow:auto;min-width:0;padding:24px;display:block}
+#support-desk .sd-call-instruction{font-size:16px;line-height:1.6;margin:16px 0 8px}
+#support-desk .sd-call-people{margin:20px 0}
+#support-desk .sd-call-person{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px 16px;margin-bottom:12px;align-items:center}
+#support-desk .sd-call-person-copy{min-width:0;overflow-wrap:anywhere}
+#support-desk .sd-call-person h2{font-size:18px;margin:0 0 6px}
+#support-desk .sd-call-person .sd-feedback{grid-column:1/-1;margin:0;overflow-wrap:anywhere}
+#support-desk .sd-person-call{background:#1f3a5f;color:white;border:0;border-radius:10px;min-height:44px;min-width:70px;padding:10px 18px;cursor:pointer}
+#support-desk .sd-person-call:disabled{opacity:.6;cursor:not-allowed}
+@media(max-width:700px){#support-desk .sd-call-page{padding:16px}#support-desk .sd-call-person{padding:14px}}
 /* Support Desk: shared cream chrome and responsive work areas. */
 #support-desk{grid-template-columns:232px minmax(0,1fr);color:#1f3a5f}
 #support-desk.sd-open{grid-template-columns:232px 360px minmax(340px,1fr) 280px}
@@ -531,6 +795,7 @@ body .hired-desk #kioskx-voice-connect a{color:#2f5f8a}
 #support-desk .sd-mail-message.sent{background:#e8eef6}
 #support-desk .sd-mail-body{white-space:normal;overflow-wrap:anywhere;line-height:1.6;background:#fff;color:#242424;padding:16px;border-radius:8px;overflow-x:auto}#support-desk .sd-mail-body img{max-width:100%;height:auto}#support-desk .sd-mail-body table{max-width:100%;border-collapse:collapse;border:0}#support-desk .sd-mail-body td,#support-desk .sd-mail-body th{padding:4px;border:0}#support-desk .sd-mail-body a{color:#245a88;text-decoration:underline}#support-desk .sd-mail-body p{white-space:normal}#support-desk .sd-mail-body pre{white-space:pre-wrap}
 #support-desk .sd-mail-reply textarea{display:block;width:100%;min-height:110px;margin:8px 0}
+#support-desk .sd-mail-reply > button[type=submit]{display:block;margin-left:auto;font-weight:700;min-height:44px}
 #support-desk .sd-mail-paging{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
 @media(max-width:760px){#support-desk .sd-mail-layout{display:flex;flex-direction:column;overflow:auto}#support-desk .sd-mail-list{flex:0 0 200px;min-height:0;max-height:200px}#support-desk .sd-mail-thread{flex:0 0 540px;min-height:540px;padding:12px}#support-desk .sd-mail-message{padding:8px}#support-desk .sd-mail-body{padding:8px}}
 #support-desk .sd-embed{position:absolute;left:232px;right:0;top:0;bottom:0;display:flex;flex-direction:column;min-width:0;background:#f3f5f9;overflow:hidden;z-index:1}
@@ -541,51 +806,64 @@ body .hired-desk #kioskx-voice-connect a{color:#2f5f8a}
 `;document.head.append(css);
 window.kxQueueCounts=null;window.kxOpenQueue=k=>navigate(names[k]?k:'inbox');
 function hashArticle(){const m=location.hash.match(/^#desk-article=(\d+)$/);if(m&&articles[Number(m[1])]){article=Number(m[1]);navigate('knowledge');}}window.addEventListener('hashchange',hashArticle);
-function start(){if(!document.documentElement)return;const desk=document.querySelector('main.hired-desk');if(host&&!host.isConnected)host=null;if(!desk||host)return;host=el('div');host.id='support-desk';desk.append(host);hashArticle();render();api('queues').then(d=>{data=d;window.kxQueueCounts=Object.fromEntries(Object.keys(names).map(k=>[k,rows().filter(r=>r.queue===k).length]));render();chooseWorkspace();}).catch(()=>{data={unavailable:true};window.kxQueueCounts={};render();});}
+setInterval(()=>{if(host?.isConnected&&company==='AniDeeBee'&&!document.hidden)loadApplications(true);},30000);
+const routeStyle=document.createElement('style');routeStyle.textContent=`
+#support-desk .sd-person-back,#support-desk .sd-mail-back{min-height:44px;margin-bottom:12px;font-weight:700;align-self:flex-start}
+@media(min-width:851px){#support-desk.sd-person-open{grid-template-columns:232px 360px minmax(0,1fr)}}
+@media(max-width:850px){
+ #support-desk.sd-person-open>.sd-list,#support-desk.sd-person-open>.sd-rail,#support-desk.sd-reading-mail>.sd-rail{display:none}
+ #support-desk.sd-person-open>.sd-center{padding:12px}
+ #support-desk.sd-reading-mail .sd-mail-list{display:none}
+ #support-desk.sd-reading-mail .sd-embed{height:100dvh;min-height:0}
+ #support-desk.sd-reading-mail .sd-mail-thread{flex:1;min-height:0;overflow:auto}
+ #support-desk.sd-reading-mail .sd-mail-messages{flex:none;overflow:visible}
+}
+`;document.head.append(routeStyle);
+const smartStyle=document.createElement('style');smartStyle.textContent='\n#support-desk .sd-people-layout{display:grid;grid-template-columns:minmax(220px,1fr) minmax(0,2fr);gap:20px;align-items:start;margin:20px 0}\n#support-desk .sd-people-list{min-width:0;max-height:75vh;overflow:auto}\n#support-desk .sd-source-person{display:block;width:100%;text-align:left;padding:14px;border:1px solid #dce2ec;background:#fff;color:#1f3a5f;border-radius:8px;margin:5px 0}\n#support-desk .sd-source-person strong,#support-desk .sd-source-person>span{display:block;overflow-wrap:anywhere}\n#support-desk .sd-person-card{min-width:0;overflow-wrap:anywhere;background:#fff;padding:20px;border:1px solid #dce2ec;border-radius:12px}\n#support-desk .sd-person-card h2{margin:0 0 8px;font-size:22px}\n#support-desk .sd-person-card h3{font-size:15px;margin:18px 0 8px}\n#support-desk .sd-person-card textarea{display:block;width:100%;min-height:180px;padding:12px;border:1px solid #dce2ec;border-radius:8px;resize:vertical;font:inherit;box-sizing:border-box}\n#support-desk .sd-person-actions{display:flex;justify-content:space-between;gap:16px}\n#support-desk .sd-person-actions button{padding:12px 22px;border:1px solid #dce2ec;border-radius:8px;font-weight:700}\n#support-desk .sd-person-send{margin-left:auto!important;background:#1f3a5f!important;color:#fff!important;font-weight:700!important}\n#support-desk .sd-person-event{border-top:1px solid #dce2ec;padding:12px 0;white-space:pre-wrap}\n#support-desk .sd-person-event time{display:block;color:#64748b;font-size:12px}\n#support-desk .sd-resume-preview{width:100%;height:480px;border:1px solid #dce2ec}\n@media(max-width:699px){#support-desk .sd-people-layout{grid-template-columns:minmax(0,1fr)}#support-desk .sd-people-list{max-height:250px}#support-desk .sd-person-card{padding:14px}#support-desk .sd-person-actions{position:sticky;bottom:0;background:#fff;padding:8px 0}}\n';document.head.append(smartStyle);
+function start(){if(!document.documentElement)return;const desk=document.querySelector('main.hired-desk');if(host&&!host.isConnected)host=null;if(!desk||host)return;host=el('div');host.id='support-desk';desk.append(host);hashArticle();render();api('queues').then(d=>{data=d;window.kxQueueCounts=Object.fromEntries(Object.keys(names).map(k=>[k,rows().filter(r=>r.queue===k).length]));if(queue!=='inbox'||!host.querySelector('.sd-mail'))render();chooseWorkspace();loadApplications();}).catch(()=>{data={unavailable:true};window.kxQueueCounts={};render();});}
 new MutationObserver(start).observe(document.documentElement,{childList:true,subtree:true});start();
-// The visible form drives Twenty's own form; Twenty alone signs in, stores and
-// refreshes its token pair, checks hired access, and mounts main.hired-desk.
-let login=null,loginPending=false,passwordSubmitted=false,loginTimer=null,justSignedIn=false;
+// Twenty authenticates directly, even before its native form has mounted.
+let login=null,loginPending=false,loginTimer=null;
+let justSignedIn=sessionStorage.getItem('sd-choose-workspace')==='1';
 const authPath=()=>location.pathname==='/'||location.pathname==='/welcome'||location.pathname.startsWith('/welcome/');
-const nativeForm=()=>[...document.querySelectorAll('form')].find(f=>!f.closest('#sd-login')&&f.querySelector('input[autocomplete="email"],input[placeholder="Email"]'));
 const nativeControl=re=>[...document.querySelectorAll('button,a')].find(e=>!e.closest('#sd-login')&&re.test(e.textContent.trim()));
-function nativeValue(input,value){if(!input)return;Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,value);input.dispatchEvent(new Event('input',{bubbles:true}));input.dispatchEvent(new Event('change',{bubbles:true}));}
 function loginFailure(message='Email or password is incorrect. Try again or reset your password.'){
- if(!login)return;loginPending=false;passwordSubmitted=false;clearTimeout(loginTimer);
+ if(!login)return;loginPending=false;clearTimeout(loginTimer);
  const password=login.querySelector('[name=password]');password.value='';password.type='password';login.querySelector('[data-show]').setAttribute('aria-pressed','false');
- nativeValue(nativeForm()?.querySelector('input[placeholder="Password"],input[type=password]'),'');
  const error=login.querySelector('[role=alert]');error.textContent=message;error.hidden=false;login.querySelector('[type=submit]').disabled=false;
 }
-// Watch only auth results, without reading/storing credentials or token values.
-const crmFetch=window.fetch;
-window.fetch=async function(...args){
- let authRequest=false;
- try{const url=typeof args[0]==='string'?args[0]:args[0]?.url;const operation=typeof args[1]?.body==='string'?JSON.parse(args[1].body).operationName:'';
-  authRequest=!!url&&new URL(url,location.origin).pathname==='/metadata'&&/^(CheckUserExists|SignIn|GetLoginTokenFromCredentials|GetAuthTokensFromLoginToken)$/i.test(operation);
- }catch{}
- let response;try{response=await crmFetch.apply(this,args);}catch(error){if(loginPending&&authRequest)loginFailure('Sign-in is unavailable. Please try again.');throw error;}
- if(loginPending&&authRequest){try{
-   const result=await response.clone().json();
-   if(result.data?.checkUserExists?.exists===false){
-    loginFailure();
-    // Keep an unknown hire on sign-in; never advance the native form to sign-up.
-    return new Response(JSON.stringify({errors:[{message:'Email or password is incorrect.'}]}),{status:200,headers:{'Content-Type':'application/json'}});
-   }
-   if(result.errors?.length)loginFailure();
- }catch{/* Native CRM handles non-JSON responses. */}}
- return response;
-};
-
-function advanceNativeLogin(){
- if(!loginPending||passwordSubmitted)return;
- const form=nativeForm(),password=form?.querySelector('input[placeholder="Password"],input[type=password]');
- if(!password)return;
- const submit=form.querySelector('[type=submit]');
- if(!submit||!/sign in/i.test(submit.textContent)){if(/sign up/i.test(submit?.textContent||''))loginFailure();return;}
- passwordSubmitted=true;
- nativeValue(form.querySelector('input[autocomplete=email],input[placeholder="Email"]'),login.querySelector('[name=email]').value.trim());
- nativeValue(password,login.querySelector('[name=password]').value);
- let checks=0;const finish=()=>{if(!loginPending)return;if(submit.disabled){if(++checks<40){setTimeout(finish,50);return;}loginFailure();return;}form.requestSubmit();};setTimeout(finish,50);
+async function signIn(form){
+ const controller=new AbortController();
+ loginTimer=setTimeout(()=>controller.abort(),20000);
+ const metadata=async(operationName,query,variables)=>{
+  const response=await fetch('/metadata',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},signal:controller.signal,body:JSON.stringify({operationName,query,variables})});
+  if(!response.ok)throw Error('unavailable');
+  const result=await response.json();
+  if(result.errors?.length)throw Error('credentials');
+  return result.data;
+ };
+ try{
+  const email=form.querySelector('[name=email]').value.trim(),origin=location.origin;
+  const user=await metadata('CheckUserExists','query CheckUserExists($email: String!) { checkUserExists(email: $email) { exists } }',{email});
+  if(user?.checkUserExists?.exists!==true)throw Error('credentials');
+  const credentials=await metadata('GetLoginTokenFromCredentials','mutation GetLoginTokenFromCredentials($email: String!, $password: String!, $origin: String!) { getLoginTokenFromCredentials(email: $email, password: $password, origin: $origin) { loginToken { token } } }',{email,password:form.querySelector('[name=password]').value,origin});
+  const loginToken=credentials?.getLoginTokenFromCredentials?.loginToken?.token;
+  if(typeof loginToken!=='string'||!loginToken)throw Error('credentials');
+  const result=await metadata('getAuthTokensFromLoginToken','mutation getAuthTokensFromLoginToken($loginToken: String!, $origin: String!) { getAuthTokensFromLoginToken(loginToken: $loginToken, origin: $origin) { tokens { __typename accessOrWorkspaceAgnosticToken { __typename token expiresAt } refreshToken { __typename token expiresAt } } } }',{loginToken,origin});
+  const pair=result?.getAuthTokensFromLoginToken?.tokens;
+  if(!pair||!['accessOrWorkspaceAgnosticToken','refreshToken'].every(k=>typeof pair[k]?.token==='string'&&pair[k].token))throw Error('credentials');
+  if(controller.signal.aborted)throw Error('unavailable');
+  // Store only the server-issued pair in the shape Twenty validates on boot.
+  localStorage.setItem('tokenPairState',JSON.stringify(pair));
+  if(form.querySelector('[type=checkbox]').checked){localStorage.removeItem('sd-session-only');sessionStorage.removeItem('sd-session-active');}
+  else{localStorage.setItem('sd-session-only','1');sessionStorage.setItem('sd-session-active','1');}
+  localStorage.setItem('sd-session-email',email);sessionStorage.setItem('sd-choose-workspace','1');
+  form.querySelector('[name=password]').value='';clearTimeout(loginTimer);
+  location.replace('/welcome');
+ }catch(error){
+  localStorage.removeItem('tokenPairState');sessionStorage.removeItem('sd-choose-workspace');
+  loginFailure(error.message==='credentials'?undefined:'Sign-in is unavailable. Please try again.');
+ }
 }
 function brandMark(){const b=el('div','sl-brand');b.innerHTML='<span class="sl-mark" aria-hidden="true">∪<i></i></span><span><strong>Unified Support</strong><small>CUSTOMER SUPPORT</small></span>';return b;}
 function mountLogin(){
@@ -602,13 +880,7 @@ function mountLogin(){
  const explain=t=>{info.hidden=false;info.textContent=t;};
  const forgot=button('Forgot password?',()=>{const reset=nativeControl(/^Forgot (your )?password\?$/i);if(reset){login.remove();login=null;document.body.classList.remove('sd-auth');authDelegated=true;reset.click();}else explain('Password reset is not available on this desk. Ask your company admin.');});form.querySelector('.sl-password-label').append(forgot);
  const submit=button('Sign in');submit.type='submit';submit.className='sl-submit';form.append(submit);
- form.onsubmit=e=>{e.preventDefault();if(loginPending)return;const native=nativeForm();if(!native){explain('Sign-in is still loading. Please try again.');return;}error.hidden=true;info.hidden=true;loginPending=true;passwordSubmitted=false;submit.disabled=true;
-  // Scope the existing CRM session to this browser tab when persistence is off.
-  if(form.querySelector('[type=checkbox]').checked){localStorage.removeItem('sd-session-only');}else{localStorage.setItem('sd-session-only','1');sessionStorage.setItem('sd-session-active','1');}
-  loginTimer=setTimeout(()=>loginFailure('Sign-in did not finish. Please try again.'),20000);
-  nativeValue(native.querySelector('input[autocomplete=email],input[placeholder="Email"]'),form.querySelector('[name=email]').value.trim());
-  if(native.querySelector('input[placeholder="Password"],input[type=password]'))advanceNativeLogin();else setTimeout(()=>{if(loginPending)native.requestSubmit();},0);
- };
+ form.onsubmit=e=>{e.preventDefault();if(loginPending)return;error.hidden=true;info.hidden=true;loginPending=true;submit.disabled=true;signIn(form);};
  card.append(form,el('div','sl-or','or'));const google=button('Continue with Google',()=>{const native=nativeControl(/^(Continue|Sign in) with Google$/i);if(native)native.click();else explain('Google sign-in is not connected on this desk.');},'sl-google');card.append(google,info,el('p','sl-invite','No account? Ask your company admin for an invite.'));
  const legal=el('div','sl-legal');for(const [name,re] of [['Privacy',/Privacy (Policy)?/i],['Terms',/Terms (of Service)?/i]]){if(legal.childNodes.length)legal.append(document.createTextNode(' · '));const a=button(name,()=>{const link=nativeControl(re);if(link)link.click();});legal.append(a);}card.append(legal);side.append(card);login.append(brand,side);document.body.append(login);document.body.classList.add('sd-auth');
 }
@@ -619,11 +891,11 @@ function syncLogin(){
  if(authDelegated&&!authPath())delegatedAway=true;
  if(authDelegated&&delegatedAway&&authPath()){authDelegated=false;delegatedAway=false;}
  const desk=document.querySelector('main.hired-desk');
- if(!desk&&host){host.remove();host=null;data=null;}if(desk){if(login){justSignedIn=loginPending;if(loginPending)localStorage.setItem('sd-session-email',login.querySelector('[name=email]').value.trim());login.remove();login=null;loginPending=false;clearTimeout(loginTimer);}document.body.classList.remove('sd-auth');return;}
- if(!authDelegated)mountLogin();advanceNativeLogin();
+ if(!desk&&host){host.remove();host=null;data=null;}if(desk){if(login){justSignedIn=justSignedIn||loginPending;if(loginPending)localStorage.setItem('sd-session-email',login.querySelector('[name=email]').value.trim());login.remove();login=null;loginPending=false;clearTimeout(loginTimer);}document.body.classList.remove('sd-auth');return;}
+ if(!authDelegated)mountLogin();
 }
 function chooseWorkspace(){
- if(!justSignedIn||!data||data.unavailable)return;justSignedIn=false;
+ if(!justSignedIn||!data||data.unavailable)return;justSignedIn=false;sessionStorage.removeItem('sd-choose-workspace');
  const connected=companies;
  const chooser=el('section','sl-workspaces');chooser.id='sd-workspaces';chooser.append(brandMark(),el('h1','','Choose a workspace'),el('p','','Choose a company desk.'));
  host.inert=true;chooser.setAttribute('role','dialog');chooser.setAttribute('aria-modal','true');chooser.setAttribute('aria-label','Choose a workspace');
@@ -636,7 +908,7 @@ html:has(body.sd-auth),html:has(#sd-workspaces),body:has(#sd-workspaces){overflo
 #sd-login * ,#sd-workspaces *{box-sizing:border-box}#sd-login{position:fixed;inset:0;height:100dvh;overflow:hidden;display:grid;grid-template-columns:620px minmax(0,1fr);z-index:2000}
 #sd-login button,#sd-workspaces button{font:inherit;cursor:pointer}#sd-login button:disabled{cursor:wait;opacity:.65}#sd-login [hidden]{display:none!important}
 .sl-panel{background:#1f3a5f;color:white;padding:56px;display:flex;flex-direction:column;min-height:0}.sl-brand{display:flex;align-items:center;gap:12px}.sl-brand strong{font-size:20px;letter-spacing:-.5px}.sl-brand small{display:block;font-size:10px;font-weight:600;letter-spacing:1px}.sl-mark{position:relative;width:40px;height:40px;background:white;color:#1f3a5f;border-radius:10px;text-align:center;font:bold 36px/36px Arial}.sl-mark i{position:absolute;width:6px;height:6px;background:#1f3a5f;border-radius:50%;left:18px;top:12px}
-.sl-story{margin-top:auto;padding-top:70px}.sl-story h1{font-size:40px;line-height:1.15;letter-spacing:-1px;max-width:420px;margin:0 0 22px}.sl-story p{font-size:16px;line-height:24px;color:#c9d6e8;margin:0 0 20px}.sl-pills{display:flex;gap:8px}.sl-pills span{padding:6px 12px;border-radius:20px;background:#ffffff20;font-size:12px;font-weight:600}.sl-story ul{padding:0;margin:54px 0 0;list-style:none;font-size:13px}.sl-story li{position:relative;padding-left:28px;margin-top:18px}.sl-story li:before{content:'✓';position:absolute;left:0;border-radius:50%;background:#2f7a4f;width:18px;height:18px;text-align:center;font-size:11px}
+.sl-story{margin-top:auto;padding-top:70px}.sl-story h1{font-size:40px;line-height:1.15;letter-spacing:-1px;max-width:420px;margin:0 0 22px}.sl-story p{font-size:16px;line-height:24px;color:#c9d6e8;margin:0 0 20px}.sl-pills{display:flex;flex-wrap:wrap;gap:8px}.sl-pills span{padding:6px 12px;border-radius:20px;background:#ffffff20;font-size:12px;font-weight:600}.sl-story ul{padding:0;margin:54px 0 0;list-style:none;font-size:13px}.sl-story li{position:relative;padding-left:28px;margin-top:18px}.sl-story li:before{content:'✓';position:absolute;left:0;border-radius:50%;background:#2f7a4f;width:18px;height:18px;text-align:center;font-size:11px}
 .sl-side{display:flex;align-items:center;justify-content:center;padding:36px}.sl-card{background:#fff;border:1px solid #dce2ec;border-radius:20px;padding:32px 36px 34px;width:440px;max-width:100%}.sl-card h2{font-size:28px;letter-spacing:-1px;line-height:36px;margin:0 0 12px}.sl-subtitle{margin:0 0 12px;color:#64748b}.sl-card label{display:block;font-size:12px;font-weight:600}.sl-card input:not([type=checkbox]){width:100%;height:45px;border:1px solid #dce2ec;border-radius:10px;background:white;padding:12px 14px;font:14px Inter,Arial,sans-serif;color:#1f3a5f;margin-top:4px}.sl-card input::placeholder{color:#64748b}.sl-password-label{display:flex;align-items:center;justify-content:space-between;margin-top:14px}.sl-password-label button,.sl-password button,.sl-legal button{border:0;background:none;padding:0;color:#2f5f8a;font-size:12px}.sl-password{position:relative}.sl-password input{padding-right:66px!important}.sl-password button{position:absolute;right:15px;top:17px}.sl-remember{display:flex!important;align-items:center;gap:8px;font-size:13px!important;font-weight:400!important;margin:16px 0}.sl-remember input{accent-color:#1f3a5f;width:18px;height:18px;margin:0}.sl-submit,.sl-google{width:100%;height:44px;border-radius:12px;border:1px solid #dce2ec;font-weight:600!important}.sl-submit{background:#1f3a5f;color:white;border:0}.sl-google{background:white;color:#1f3a5f}.sl-or{display:flex;align-items:center;gap:10px;color:#64748b;font-size:12px;margin:16px 0}.sl-or:before,.sl-or:after{content:'';height:1px;background:#dce2ec;flex:1}.sl-invite{text-align:center;font-size:12px;color:#64748b;margin:14px 0 0}.sl-legal{text-align:center;font-size:12px}.sl-error{background:#f6ddd8;border:1px solid #a63d2f;border-radius:8px;padding:12px;color:#a63d2f;font-size:13px;margin:20px 0}.sl-info{font-size:13px}.sl-workspaces{position:fixed;inset:0;z-index:2100;display:flex;align-items:center;justify-content:center;flex-direction:column;padding:36px;overflow:auto}.sl-workspaces h1{font-size:32px;margin:24px 0 8px}.sl-workspaces>.sl-brand .sl-mark{background:#1f3a5f;color:white}.sl-workspaces>.sl-brand .sl-mark i{background:white}.sl-all{position:relative;text-align:left;width:760px;max-width:100%;background:white;border:1px solid #dce2ec;border-radius:12px;padding:20px;margin:24px 0 16px}.sl-all strong,.sl-all span{display:block}.sl-all b{position:absolute;right:24px;top:30px}.sl-workspace-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:14px;max-width:760px;width:100%}.sl-workspace-grid button{border:1px solid #dce2ec;border-radius:12px;background:white;color:#1f3a5f;text-align:left;padding:20px}.sl-workspace-grid strong,.sl-workspace-grid small{display:block;margin:6px 0}.sl-workspace-grid span{display:block;font-size:12px}.sl-initial{font-size:20px!important;margin-bottom:16px;width:36px;height:36px;background:#e3e9f2;border-radius:8px;text-align:center;line-height:36px}.sl-workspace-grid .sl-role{display:inline-block;border-radius:12px;background:#e3e9f2;padding:2px 8px}.sl-open-count{margin-top:5px}
 @media(max-width:1100px){#sd-login{grid-template-columns:46% 54%}.sl-panel{padding:36px}.sl-side{padding:24px}.sl-card{padding:28px}.sl-story h1{font-size:36px}}@media(min-width:700px) and (max-height:800px){.sl-panel{padding:32px}.sl-story{padding-top:28px}.sl-story h1{font-size:34px}.sl-story ul{margin-top:28px}.sl-side{padding:20px}.sl-card{padding:24px 28px}}@media(max-width:699px){html:has(body.sd-auth),body.sd-auth{overflow:auto!important}#sd-login{position:absolute;display:block;height:auto;min-height:100dvh;overflow:visible}.sl-panel{min-height:0;padding:28px 24px}.sl-story{padding-top:42px}.sl-story h1{font-size:32px}.sl-story ul{margin-top:28px}.sl-side{padding:24px 16px}.sl-card{padding:28px 24px}.sl-workspaces{justify-content:flex-start;padding:28px 18px}.sl-workspace-grid{grid-template-columns:repeat(2,1fr)}.sl-workspaces h1{font-size:28px}.sl-workspaces>p{text-align:center}}
 

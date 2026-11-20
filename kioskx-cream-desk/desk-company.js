@@ -62,7 +62,7 @@ async function mailRead(input, deps={}) {
   const data=await api(`/api/v1/accounts/${desk.account}/conversations?inbox_id=${desk.inbox}&status=all&assignee_type=all&page=${page}`);
   if(!Array.isArray(data.data?.payload))return failed;
   const source=data.data.payload;
-  return {sync,company:input.company,mailbox:desk.mail,page,more:source.length>=20,conversations:source.filter(r=>Number(r.inbox_id)===desk.inbox).map(r=>({id:r.id,name:input.company==='Kiosk X'?'Kiosk inquiry':String(r.meta?.sender?.name||'Customer'),status:r.status,preview:safeText(input.company,r.messages?.[0]?.content||'Open conversation'),time:r.last_activity_at}))};
+  return {sync,company:input.company,mailbox:desk.mail,page,more:source.length>=20,conversations:source.filter(r=>Number(r.inbox_id)===desk.inbox).map(r=>({id:r.id,name:input.company==='Kiosk X'?'Kiosk inquiry':String(r.meta?.sender?.name||'Customer'),subject:safeText(input.company,r.additional_attributes?.mail_subject||r.messages?.[0]?.content_attributes?.email?.subject||''),sender:input.company==='Kiosk X'?'Kiosk inquiry':String(r.meta?.sender?.email||r.meta?.sender?.name||'Unknown sender'),status:r.status,preview:safeText(input.company,r.messages?.[0]?.content||'Open conversation'),time:r.last_activity_at}))};
  }catch{return failed;}
 }
 // Uses the existing durable work ledger. An ambiguous upstream POST is never replayed.
