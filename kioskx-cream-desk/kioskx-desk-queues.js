@@ -32,9 +32,56 @@ function activity(){return rows().flatMap(r=>(r.thread||[]).filter(t=>new Date(t
 function today(expanded=false){const a=activity().filter(t=>matchesCompany(t.row)),box=el('details','sd-today');box.open=expanded;const n=k=>a.filter(t=>t.kind===k).length;box.append(el('summary','',unavailable()?'Today: activity unavailable.':a.length?`Today: ${n('email')} emails, ${n('call')} calls, ${n('sms')} texts.`:'Today: nothing sent.'));for(const t of a)box.append(el('p','',`${names[t.row.queue]} — ${displayName(t.row)} — ${t.kind==='email'?'Email sent':t.kind==='sms'?'Text sent':t.status==='queued'?'Call queued':'Call completed'} — ${time(t.time)}`));return box;}
 function legend(){const card=el('section','sd-card sd-legend');card.append(el('h3','','STATUS MEANING'));for(const [s,d]of [['New','Not contacted'],['Call next','You still need to call'],['Waiting','Waiting on them'],['Done','Finished']]){const p=el('p');p.append(chip(s),el('span','',d));card.append(p);}card.append(el('p','sd-muted','These chips do not send anything.'));return card;}
 function fields(title,pairs,cls=''){const card=el('section','sd-card '+cls);card.append(el('h3','',title));const dl=el('dl');for(const [k,v]of pairs){dl.append(el('dt','',k),el('dd','',v));}card.append(dl);return card;}
-function navigate(k,id=''){if(busy)return;remember();if(queueKeys.includes(k))company=deskOf({queue:k});queue=k;open=id;if(id)lastRequest=id;search='';channel='All';window.kxQueue=k;render();if(k==='jobs')loadApplications();}
-async function loadApplications(){
- try{const result=await api('applications?company=AniDeeBee');if(!data?.queues)return;const existing=data.queues.jobs?.rows||[];const merged=new Map(existing.map(r=>[r.id,r]));for(const r of result.applications||[])merged.set(r.id,{...r,...merged.get(r.id),fields:r.fields,resume:r.resume,readOnly:!merged.has(r.id)});data.queues.jobs={...data.queues.jobs,rows:[...merged.values()].sort((a,b)=>new Date(b.when)-new Date(a.when)),applicationUnavailable:result.unavailable};if(queue==='jobs'&&company==='AniDeeBee'&&!open)render();}catch{if(data?.queues?.jobs)data.queues.jobs.applicationUnavailable=true;}
+function navigate(k,id=''){if(busy)return;remember();if(queueKeys.includes(k))company=deskOf({queue:k});queue=k;open=id;if(id)lastRequest=id;search='';channel='All';window.kxQueue=k;render();if(company==='AniDeeBee'&&['jobs','today','queues'].includes(k))loadApplications();}
+let applicationLoad=null,applicationTimer=null,applicationsLoadedAt=0;
+const indeedFailure='Indeed applications could not be loaded. Showing the applications saved on the desk.';
+function applicationNotice(parent) {
+ if(company!=='AniDeeBee')return;
+ const jobs=data?.queues?.jobs;
+ if(jobs?.applicationLoading)parent.append(el('p','sd-muted sd-application-status','Loading Indeed applications. Showing the applications saved on the desk.'));
+ if(jobs?.applicationUnavailable){
+  const notice=el('div','sd-application-status');notice.setAttribute('role','status');
+  notice.append(el('p','sd-muted',indeedFailure),button('Retry Indeed',()=>loadApplications(true)));
+  parent.append(notice);
+ }
+ if(jobs?.savedApplicationsUnavailable)parent.append(el('p','sd-muted','Saved application files could not be loaded. Showing the requests already on the desk.'));
+}
+function updateApplicationView() {
+ window.kxQueueCounts=Object.fromEntries(Object.keys(names).map(k=>[k,rows().filter(r=>r.queue===k).length]));
+ if(company==='AniDeeBee'&&['jobs','today','queues'].includes(queue)&&!open){remember();render();}
+}
+async function loadApplications(force=false){
+ if(!data?.queues||applicationLoad)return;
+ if(!force&&Date.now()-applicationsLoadedAt<60000)return;
+ const board=data;
+ applicationLoad=board;
+ clearTimeout(applicationTimer);
+ board.queues.jobs=board.queues.jobs||{rows:[]};
+ const jobs=board.queues.jobs;
+ jobs.applicationLoading=true;jobs.applicationUnavailable=false;
+ updateApplicationView();
+ function merge(result,source) {
+  if(data!==board)return;
+  const existing=jobs.rows||[], byId=new Map(existing.map(r=>[r.id,r]));
+  for(const r of result.applications||[])byId.set(r.id,{...r,...byId.get(r.id),fields:r.fields,resume:r.resume,readOnly:byId.has(r.id)?!!byId.get(r.id).readOnly:true,applicationSource:source});
+  jobs.rows=[...byId.values()].sort((a,b)=>new Date(b.when||0)-new Date(a.when||0));
+ }
+ const saved=api('applications?company=AniDeeBee&source=saved').then(result=>{
+  if(data!==board)return;merge(result,'saved');jobs.savedApplicationsUnavailable=!!result.unavailable;updateApplicationView();
+ }).catch(()=>{if(data===board){jobs.savedApplicationsUnavailable=true;updateApplicationView();}});
+ const started=Date.now();
+ async function poll(){
+  try {
+   const result=await api('applications?company=AniDeeBee&source=indeed');
+   if(data!==board)return;
+   merge(result,'indeed');jobs.applicationLoading=!!result.loading;jobs.applicationUnavailable=!!result.unavailable;
+   if(result.loading&&Date.now()-started<180000){applicationTimer=setTimeout(poll,1500);}
+   else {jobs.applicationLoading=false;jobs.applicationUnavailable=!!result.unavailable||!!result.loading;applicationLoad=null;applicationsLoadedAt=Date.now();}
+  } catch {if(data===board){jobs.applicationLoading=false;jobs.applicationUnavailable=true;applicationLoad=null;applicationsLoadedAt=0;}}
+  if(data===board)updateApplicationView();
+ }
+ // Each source paints independently; saved applications never wait for Indeed.
+ void saved;void poll();
 }
 function resumeLink(r){const link=el('a','sd-resume','Open resume');link.href=r.resume.url||'/kioskx-hired-desk/'+r.resume.path;link.target='_blank';link.rel='noopener noreferrer';if(r.resume.path)link.onclick=async e=>{e.preventDefault();try{const response=await fetch(link.href,{headers:{Authorization:'Bearer '+token()},cache:'no-store'});if(!response.ok)throw Error();const url=URL.createObjectURL(await response.blob());const a=el('a');a.href=url;a.download=r.resume.name||'resume';a.click();setTimeout(()=>URL.revokeObjectURL(url),60000);}catch{link.textContent='Resume unavailable — try again';}};return link;}
 function remember(){const field=host?.querySelector('textarea[aria-label="Reply"],textarea[aria-label="Email"]');if(open&&field)drafts[open]=field.value;}
@@ -54,15 +101,15 @@ function logOut(){
  if(!native){const notice=host.querySelector('.sd-session-status');notice.textContent='Sign out is unavailable. Reload the page and try again.';return;}
  // Invoke the CRM boundary: it clears its session atom and redirects to login.
  localStorage.removeItem('sd-session-email');localStorage.removeItem('sd-session-only');sessionStorage.removeItem('sd-session-active');
- drafts={};dismissed.clear();data=null;open='';queue='inbox';company='Kiosk X';lastRequest='';window.kxQueueCounts=null;
+ clearTimeout(applicationTimer);applicationLoad=null;applicationsLoadedAt=0;drafts={};dismissed.clear();data=null;open='';queue='inbox';company='Kiosk X';lastRequest='';window.kxQueueCounts=null;
  native.click();
 }
 function render(){if(!host)return;const voice=document.querySelector('#kioskx-voice-connect');if(voice){delete voice.dataset.deskRequested;if(host.contains(voice))document.querySelector('.hired-desk').append(voice);}host.replaceChildren();const all=rows().filter(matchesCompany),current=all.find(r=>r.id===open);host.classList.toggle('sd-open',!!current);host.classList.toggle('sd-inbox-open',!!current&&queue==='inbox');const rail=el('aside','sd-rail');rail.setAttribute('aria-label','Support Desk');const brand=brandMark(),mark=el('img','sd-logo');mark.src='data:image/svg+xml;base64,PHN2ZyB3aWR0aD0iNDgiIGhlaWdodD0iNDgiIHZpZXdCb3g9IjAgMCA0OCA0OCIgZmlsbD0ibm9uZSIgeG1sbnM9Imh0dHA6Ly93d3cudzMub3JnLzIwMDAvc3ZnIj4KPGcgY2xpcC1wYXRoPSJ1cmwoI2NsaXAwXzI0XzMyKSI+CjxwYXRoIGQ9Ik0zNiAwSDEyQzUuMzcyNTggMCAwIDUuMzcyNTggMCAxMlYzNkMwIDQyLjYyNzQgNS4zNzI1OCA0OCAxMiA0OEgzNkM0Mi42Mjc0IDQ4IDQ4IDQyLjYyNzQgNDggMzZWMTJDNDggNS4zNzI1OCA0Mi42Mjc0IDAgMzYgMFoiIGZpbGw9IiMxRjNBNUYiLz4KPHBhdGggZD0iTTE1IDEyLjVWMjVDMTUgMjcuMzg2OSAxNS45NDgyIDI5LjY3NjEgMTcuNjM2IDMxLjM2NEMxOS4zMjM5IDMzLjA1MTggMjEuNjEzMSAzNCAyNCAzNEMyNi4zODY5IDM0IDI4LjY3NjEgMzMuMDUxOCAzMC4zNjQgMzEuMzY0QzMyLjA1MTggMjkuNjc2MSAzMyAyNy4zODY5IDMzIDI1VjEyLjUiIHN0cm9rZS13aWR0aD0iNC42IiBzdHJva2UtbGluZWNhcD0icm91bmQiIHN0cm9rZS1saW5lam9pbj0icm91bmQiIHN0cm9rZT0id2hpdGUiLz4KPHBhdGggZD0iTTI0IDIwLjZDMjUuODc3OCAyMC42IDI3LjQgMTkuMDc3OCAyNy40IDE3LjJDMjcuNCAxNS4zMjIzIDI1Ljg3NzggMTMuOCAyNCAxMy44QzIyLjEyMjIgMTMuOCAyMC42IDE1LjMyMjMgMjAuNiAxNy4yQzIwLjYgMTkuMDc3OCAyMi4xMjIyIDIwLjYgMjQgMjAuNloiIGZpbGw9IiM4RkI0RkYiLz4KPC9nPgo8ZGVmcz4KPGNsaXBQYXRoIGlkPSJjbGlwMF8yNF8zMiI+CjxyZWN0IHdpZHRoPSI0OCIgaGVpZ2h0PSI0OCIgZmlsbD0id2hpdGUiLz4KPC9jbGlwUGF0aD4KPC9kZWZzPgo8L3N2Zz4K';mark.alt='';brand.querySelector('.sl-mark').replaceWith(mark);rail.append(brand,el('span','sd-sr-only','Support Desk'));
-const switcher=el('label','sd-switcher');switcher.append(el('span','sd-brand','COMPANY / APP ID'));const switchLine=el('div','sd-switch-line');const dots=el('span','sd-dots');dots.setAttribute('aria-hidden','true');dots.append(el('i'),el('i'),el('i'));const select=el('select');select.setAttribute('aria-label','Company');for(const c of companies){const o=el('option','',c==='All'?'All companies':c);o.value=c;select.append(o);}select.value=company;select.onchange=()=>{remember();company=select.value;queue=queueKeys.includes(queue)?'queues':queue;open='';search='';render();};switchLine.append(dots,select);switcher.append(switchLine);rail.append(switcher);
+const switcher=el('label','sd-switcher');switcher.append(el('span','sd-brand','COMPANY / APP ID'));const switchLine=el('div','sd-switch-line');const dots=el('span','sd-dots');dots.setAttribute('aria-hidden','true');dots.append(el('i'),el('i'),el('i'));const select=el('select');select.setAttribute('aria-label','Company');for(const c of companies){const o=el('option','',c==='All'?'All companies':c);o.value=c;select.append(o);}select.value=company;select.onchange=()=>{remember();company=select.value;queue=queueKeys.includes(queue)?'queues':queue;open='';search='';render();if(company==='AniDeeBee')loadApplications();};switchLine.append(dots,select);switcher.append(switchLine);rail.append(switcher);
 const nav=el('nav');nav.setAttribute('aria-label','Desk');for(const k of ['inbox','call','engagement','today','queues','knowledge','insights','integrations','companies','calendar']){const b=button(names[k],()=>navigate(k));b.setAttribute('aria-pressed',String(k===queue||(k==='queues'&&queueKeys.includes(queue))));if(k==='today')b.append(el('span','',activity().filter(t=>matchesCompany(t.row)).length));nav.append(b);if(k==='queues'&&(queue==='queues'||queueKeys.includes(queue)))for(const q of queueKeys.filter(q=>matchesCompany({queue:q}))){const qb=button(names[q],()=>navigate(q),'sd-subnav');qb.append(el('span','',all.filter(r=>r.queue===q&&statusOf(r)!=='Done').length));qb.setAttribute('aria-pressed',String(q===queue));nav.append(qb);}}rail.append(nav);const assistant=card('AI assistant','Drafts replies and finds articles. Never sends by itself.');assistant.classList.add('sd-assistant');rail.append(assistant);const account=el('footer','sd-account');account.append(el('strong','sd-session-name',sessionName()),button('Log out',logOut),el('p','sd-access-status',company+' · '+appIds[company]),el('p','sd-session-status'));rail.append(account);host.append(rail);
 if(queue==='inbox'||queue==='call'){renderEmbed();return;}
 if(!queueKeys.includes(queue)){const page=el('section','sd-page sd-page-'+queue);page.append(el('h1','',queue==='integrations'?'Connect a company mailbox':queue==='companies'?'Companies and access':names[queue]));host.append(page);if(queue==='engagement')renderEngagement(page);if(queue==='today')renderToday(page,all);if(queue==='queues')renderQueues(page,all);if(queue==='knowledge')renderKnowledge(page);if(queue==='insights')renderInsights(page,all);if(queue==='integrations')renderIntegrations(page);if(queue==='companies')renderCompanies(page);if(queue==='calendar')renderCalendar(page);pageHeader(page);return;}
-const list=el('section','sd-list');list.setAttribute('aria-label','Request list');list.append(el('h1','',names[queue]),el('p','sd-subtitle',`${company==='All'?'All companies':company} · ${all.filter(r=>statusOf(r)!=='Done').length} open`));const input=el('input','sd-search');input.placeholder='Search name, company, email, request';input.setAttribute('aria-label',input.placeholder);input.value=search;input.oninput=()=>{search=input.value;paintRows();};if(current&&queue==='inbox')list.append(input);if(current&&queue==='inbox'){list.append(companyPills(),pills(['All','Email','Phone','Text','Web'],channel,v=>{remember();channel=v;render();}));}if(queue!=='inbox'||!current)list.append(today(!current&&activity().length>0));const results=el('div');list.append(results);function paintRows(){results.replaceChildren();if(queue==='jobs'&&data?.queues?.jobs?.applicationUnavailable)results.append(el('p','sd-muted','Some applications could not be checked. Showing stored applications.'));let subset=all.filter(r=>(queue==='inbox'||(current&&queueKeys.includes(queue))||r.queue===queue)&&(!search||[displayName(r),companyOf(r),r.queue,r.queue==='kiosk'?'':r.email,r.summary,r.queue==='kiosk'?clean(r.message):r.message].join(' ').toLowerCase().includes(search.toLowerCase()))&&(channel==='All'||channel==='Web'||(r.thread||[]).some(t=>t.kind===({Email:'email',Phone:'call',Text:'sms'}[channel]))));if(data?.unavailable||data?.queues?.[queue]?.unavailable)results.append(el('p','sd-card sd-queue-unavailable','This queue is unavailable. Try refreshing.'));else if(!subset.length){results.append(el('p','sd-card',data?(queue==='jobs'?'No applications yet.':'No requests in this queue.'):'Loading requests…'));if(data)results.append(el('p','sd-instruction','Read the request. Write the reply. Then Email, Call, or Text. Nothing is sent until you press one of those.'));}for(const r of subset)results.append(rowButton(r));}paintRows();if(queue!=='inbox'||!current)list.append(legend());host.append(list);if(current)detail(current);if(current&&queue==='inbox'){const header=el('header','sd-inbox-header');header.append(list.querySelector('h1'),list.querySelector('.sd-subtitle'),input);host.append(header);}else list.querySelector('.sd-subtitle')?.remove();}
+const list=el('section','sd-list');list.setAttribute('aria-label','Request list');list.append(el('h1','',names[queue]),el('p','sd-subtitle',`${company==='All'?'All companies':company} · ${all.filter(r=>r.queue===queue&&statusOf(r)!=='Done').length} open`));const input=el('input','sd-search');input.placeholder='Search name, company, email, request';input.setAttribute('aria-label',input.placeholder);input.value=search;input.oninput=()=>{search=input.value;paintRows();};if(current&&queue==='inbox')list.append(input);if(current&&queue==='inbox'){list.append(companyPills(),pills(['All','Email','Phone','Text','Web'],channel,v=>{remember();channel=v;render();}));}if(queue!=='inbox'||!current)list.append(today(!current&&activity().length>0));const results=el('div');list.append(results);function paintRows(){results.replaceChildren();if(queue==='jobs')applicationNotice(results);let subset=all.filter(r=>(queue==='inbox'||(current&&queueKeys.includes(queue))||r.queue===queue)&&(!search||[displayName(r),companyOf(r),r.queue,r.queue==='kiosk'?'':r.email,r.summary,r.queue==='kiosk'?clean(r.message):r.message].join(' ').toLowerCase().includes(search.toLowerCase()))&&(channel==='All'||channel==='Web'||(r.thread||[]).some(t=>t.kind===({Email:'email',Phone:'call',Text:'sms'}[channel]))));if(data?.unavailable||data?.queues?.[queue]?.unavailable)results.append(el('p','sd-card sd-queue-unavailable','This queue is unavailable. Try refreshing.'));else if(!subset.length){results.append(el('p','sd-card',data?(queue==='jobs'?'No applications yet.':'No requests in this queue.'):'Loading requests…'));if(data)results.append(el('p','sd-instruction','Read the request. Write the reply. Then Email, Call, or Text. Nothing is sent until you press one of those.'));}for(const r of subset)results.append(rowButton(r));}paintRows();if(queue!=='inbox'||!current)list.append(legend());host.append(list);if(current)detail(current);if(current&&queue==='inbox'){const header=el('header','sd-inbox-header');header.append(list.querySelector('h1'),list.querySelector('.sd-subtitle'),input);host.append(header);}}
 function mailBody(message){
  const body=el('div','sd-mail-body');
  if(!message.html){body.textContent=message.text||'Message with attachment';return body;}
@@ -86,7 +133,7 @@ function mailBody(message){
 function renderEmbed(){
  const asked=company,page=el('section','sd-embed sd-mail'),header=el('header','sd-embed-header');
  header.append(el('h1','',queue==='inbox'?company+' · '+desks[company].mail:'Call · '+company));page.append(header);host.append(page);
- if(queue==='call'){const status=el('p','sd-card','Opening Voice Studio…');page.append(status,el('p','sd-card','Quo key is not stored yet.'));api('voice-session').then(result=>{if(!page.isConnected)return;if(result.url!=='/kioskx-hired-desk/voice/')throw Error();const frame=el('iframe','sd-studio');frame.title='Voice Studio';frame.src=result.url;frame.allow='microphone';frame.style.cssText='width:100%;height:75vh;border:0';status.replaceWith(frame);}).catch(()=>{status.textContent='Voice Studio could not be reached. Call +1 (773) 681-2818.';});return;}
+ if(queue==='call'){const asked=company,status=el('p','sd-card','Opening Quo…');page.append(status);api('quo?company='+encodeURIComponent(asked)).then(result=>{if(!page.isConnected||company!==asked)return;status.remove();if(!result||result.connected!==true){page.append(el('p','sd-card',result?.message||'Quo key is not stored yet.'));return;}if(!result.lines?.length){page.append(el('p','sd-card',result.message||'Quo has no number for this company.'));return;}const lines=card('QUO NUMBERS');for(const line of result.lines)lines.append(el('p','',line.name+' · '+line.number));const recent=card('RECENT CALLS');if(!result.calls?.length)recent.append(el('p','','No recent calls on these numbers.'));for(const item of result.calls||[]){const line=result.lines.find(entry=>entry.id===item.lineId);const when=item.at?new Date(item.at).toLocaleString([],{month:'short',day:'numeric',hour:'numeric',minute:'2-digit'}):'';recent.append(el('p','',`${item.direction==='incoming'?'Incoming':'Outgoing'} · ${item.status} · ${line?line.name:''} · ${when}${item.duration?' · '+item.duration+'s':''}`));}page.append(lines,recent,el('p','sd-muted','Nothing is sent from this list. A call from a request still uses the office line.'));}).catch(()=>{if(page.isConnected)status.textContent='Quo could not be reached.';});return;}
  const layout=el('div','sd-mail-layout'),list=el('section','sd-mail-list'),thread=el('section','sd-mail-thread');list.setAttribute('aria-label','Company conversations');thread.setAttribute('aria-label','Mail thread');layout.append(list,thread);page.append(layout);
  const live=()=>page.isConnected&&company===asked;let pageNo=1,selected=null,threadVersion=0,listBusy=false,pollThread=null;
  const notice=el('p','sd-mail-sync');notice.setAttribute('role','status');notice.hidden=true;header.append(notice);
@@ -124,8 +171,8 @@ function renderEmbed(){
  const timer=setInterval(async()=>{if(!live()){clearInterval(timer);return;}if(document.hidden)return;await loadList();try{await pollThread?.();}catch{}},15000);
 }
 function pageHeader(page){const header=el('header','sd-page-header');header.append(page.querySelector('h1'));const subtitle=page.querySelector('.sd-subtitle');if(subtitle)header.append(subtitle);const tools=el('div','sd-header-tools');if(queue==='knowledge'){const search=el('input','sd-article-search');search.placeholder='Search articles';search.setAttribute('aria-label','Search articles');search.oninput=()=>{for(const row of page.querySelectorAll('.sd-article'))row.hidden=!row.textContent.toLowerCase().includes(search.value.toLowerCase());};tools.append(search);}if(queue==='knowledge'||queue==='companies'){const action=page.querySelector(':scope > button');if(action)tools.append(action);}if(queue==='insights'){const periods=page.querySelector('.sd-pills');if(periods)tools.append(periods);}header.append(tools);page.prepend(header);}
-function renderToday(page,all){if(company==='AniDeeBee')crewOverview(page);const a=activity().filter(t=>matchesCompany(t.row));page.append(el('p','sd-subtitle',new Date().toLocaleDateString([],{weekday:'long'})+' · '+a.length+' actions sent'),kpis([['Emails sent',a.filter(t=>t.kind==='email').length],['Calls placed',a.filter(t=>t.kind==='call').length],['Texts sent',a.filter(t=>t.kind==='sms').length]]),companyPills());const log=card('TODAY');if(unavailable())log.append(el('p','','Today: activity unavailable.'));else if(!a.length)log.append(el('p','','Today: nothing sent.'));for(const t of a){const line=el('div','sd-log-row');line.append(el('time','',time(t.time)),chip(companyOf(t.row)),el('span','',names[t.row.queue]+' — '+displayName(t.row)),chip(t.kind==='email'?'Email sent':t.kind==='sms'?'Text sent':t.status==='queued'?'Call queued':'Call placed'));log.append(line);}page.append(log,el('p','sd-muted','No email addresses or phone numbers are shown in Today.'));const todo=card('STILL TO DO TODAY');for(const r of all.filter(r=>['New','Call next'].includes(statusOf(r))))todo.append(rowButton(r));if(!todo.querySelector('.sd-row'))todo.append(el('p','','No requests need a first contact or call.'));todo.append(button('Open Queues',()=>navigate('queues')));const aside=el('aside','sd-today-aside');aside.append(todo,legend());page.append(aside);}
-function renderQueues(page,all){page.append(el('p','sd-subtitle','Pick a queue to work. Counts come from real requests.'),el('h2','','Connected queues'));const grid=el('div','sd-grid');for(const [q,description]of [['cleaning','Deep cleaning requests'],['cars','Car rental requests'],['jobs','Job applications'],['kiosk','Questions about machines']]){if(!matchesCompany({queue:q}))continue;const c=card(names[q],description);c.append(el('p','sd-muted',q==='kiosk'?'KioskX':'AniDeeBee'));for(const status of ['New','Call next','Waiting','Done']){const n=all.filter(r=>r.queue===q&&statusOf(r)===status).length;if(n)c.append(chip(n+' '+status));}if(!all.some(r=>r.queue===q))c.append(chip('All clear'));if(data?.queues?.[q]?.unavailable)c.append(el('p','','This queue is unavailable. Try refreshing.'));c.append(button('Open queue →',()=>navigate(q)));grid.append(c);}page.append(grid);page.append(el('p','sd-muted','Status chips do not send anything. Nothing is sent until an agent presses Email, Call or Text.'));}
+function renderToday(page,all){applicationNotice(page);if(company==='AniDeeBee')crewOverview(page);const a=activity().filter(t=>matchesCompany(t.row));page.append(el('p','sd-subtitle',new Date().toLocaleDateString([],{weekday:'long'})+' · '+a.length+' actions sent'),kpis([['Emails sent',a.filter(t=>t.kind==='email').length],['Calls placed',a.filter(t=>t.kind==='call').length],['Texts sent',a.filter(t=>t.kind==='sms').length]]),companyPills());const log=card('TODAY');if(unavailable())log.append(el('p','','Today: activity unavailable.'));else if(!a.length)log.append(el('p','','Today: nothing sent.'));for(const t of a){const line=el('div','sd-log-row');line.append(el('time','',time(t.time)),chip(companyOf(t.row)),el('span','',names[t.row.queue]+' — '+displayName(t.row)),chip(t.kind==='email'?'Email sent':t.kind==='sms'?'Text sent':t.status==='queued'?'Call queued':'Call placed'));log.append(line);}page.append(log,el('p','sd-muted','No email addresses or phone numbers are shown in Today.'));const todo=card('STILL TO DO TODAY');if(company==='AniDeeBee')todo.append(el('p','sd-jobs-count',`${all.filter(r=>r.queue==='jobs'&&statusOf(r)!=='Done').length} open job applications`));for(const r of all.filter(r=>['New','Call next'].includes(statusOf(r))))todo.append(rowButton(r));if(!todo.querySelector('.sd-row'))todo.append(el('p','','No requests need a first contact or call.'));todo.append(button('Open Queues',()=>navigate('queues')));const aside=el('aside','sd-today-aside');aside.append(todo,legend());page.append(aside);}
+function renderQueues(page,all){applicationNotice(page);page.append(el('p','sd-subtitle','Pick a queue to work. Counts come from real requests.'),el('h2','','Connected queues'));const grid=el('div','sd-grid');for(const [q,description]of [['cleaning','Deep cleaning requests'],['cars','Car rental requests'],['jobs','Job applications'],['kiosk','Questions about machines']]){if(!matchesCompany({queue:q}))continue;const c=card(names[q],description);c.append(el('p','sd-muted',q==='kiosk'?'KioskX':'AniDeeBee'));for(const status of ['New','Call next','Waiting','Done']){const n=all.filter(r=>r.queue===q&&statusOf(r)===status).length;if(n)c.append(chip(n+' '+status));}if(!all.some(r=>r.queue===q))c.append(chip('All clear'));if(data?.queues?.[q]?.unavailable)c.append(el('p','','This queue is unavailable. Try refreshing.'));c.append(button('Open queue →',()=>navigate(q)));grid.append(c);}page.append(grid);page.append(el('p','sd-muted','Status chips do not send anything. Nothing is sent until an agent presses Email, Call or Text.'));}
 const articles=[
 ['Deep cleaning: what is included','Cleaning','Read the service, bedrooms, bathrooms, size, ZIP, date and laundry notes on the request. Confirm the requested scope before quoting. Do not promise extra services that the request does not include.'],
 ['Car for work: how a one-week request works','Cars','A request does not reserve a car. Read the vehicle, purpose, location and duration, then confirm availability and the details with the customer.'],
@@ -541,51 +588,50 @@ body .hired-desk #kioskx-voice-connect a{color:#2f5f8a}
 `;document.head.append(css);
 window.kxQueueCounts=null;window.kxOpenQueue=k=>navigate(names[k]?k:'inbox');
 function hashArticle(){const m=location.hash.match(/^#desk-article=(\d+)$/);if(m&&articles[Number(m[1])]){article=Number(m[1]);navigate('knowledge');}}window.addEventListener('hashchange',hashArticle);
-function start(){if(!document.documentElement)return;const desk=document.querySelector('main.hired-desk');if(host&&!host.isConnected)host=null;if(!desk||host)return;host=el('div');host.id='support-desk';desk.append(host);hashArticle();render();api('queues').then(d=>{data=d;window.kxQueueCounts=Object.fromEntries(Object.keys(names).map(k=>[k,rows().filter(r=>r.queue===k).length]));render();chooseWorkspace();}).catch(()=>{data={unavailable:true};window.kxQueueCounts={};render();});}
+function start(){if(!document.documentElement)return;const desk=document.querySelector('main.hired-desk');if(host&&!host.isConnected)host=null;if(!desk||host)return;host=el('div');host.id='support-desk';desk.append(host);hashArticle();render();api('queues').then(d=>{data=d;window.kxQueueCounts=Object.fromEntries(Object.keys(names).map(k=>[k,rows().filter(r=>r.queue===k).length]));render();chooseWorkspace();loadApplications();}).catch(()=>{data={unavailable:true};window.kxQueueCounts={};render();});}
 new MutationObserver(start).observe(document.documentElement,{childList:true,subtree:true});start();
-// The visible form drives Twenty's own form; Twenty alone signs in, stores and
-// refreshes its token pair, checks hired access, and mounts main.hired-desk.
-let login=null,loginPending=false,passwordSubmitted=false,loginTimer=null,justSignedIn=false;
+// Twenty authenticates directly, even before its native form has mounted.
+let login=null,loginPending=false,loginTimer=null;
+let justSignedIn=sessionStorage.getItem('sd-choose-workspace')==='1';
 const authPath=()=>location.pathname==='/'||location.pathname==='/welcome'||location.pathname.startsWith('/welcome/');
-const nativeForm=()=>[...document.querySelectorAll('form')].find(f=>!f.closest('#sd-login')&&f.querySelector('input[autocomplete="email"],input[placeholder="Email"]'));
 const nativeControl=re=>[...document.querySelectorAll('button,a')].find(e=>!e.closest('#sd-login')&&re.test(e.textContent.trim()));
-function nativeValue(input,value){if(!input)return;Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,value);input.dispatchEvent(new Event('input',{bubbles:true}));input.dispatchEvent(new Event('change',{bubbles:true}));}
 function loginFailure(message='Email or password is incorrect. Try again or reset your password.'){
- if(!login)return;loginPending=false;passwordSubmitted=false;clearTimeout(loginTimer);
+ if(!login)return;loginPending=false;clearTimeout(loginTimer);
  const password=login.querySelector('[name=password]');password.value='';password.type='password';login.querySelector('[data-show]').setAttribute('aria-pressed','false');
- nativeValue(nativeForm()?.querySelector('input[placeholder="Password"],input[type=password]'),'');
  const error=login.querySelector('[role=alert]');error.textContent=message;error.hidden=false;login.querySelector('[type=submit]').disabled=false;
 }
-// Watch only auth results, without reading/storing credentials or token values.
-const crmFetch=window.fetch;
-window.fetch=async function(...args){
- let authRequest=false;
- try{const url=typeof args[0]==='string'?args[0]:args[0]?.url;const operation=typeof args[1]?.body==='string'?JSON.parse(args[1].body).operationName:'';
-  authRequest=!!url&&new URL(url,location.origin).pathname==='/metadata'&&/^(CheckUserExists|SignIn|GetLoginTokenFromCredentials|GetAuthTokensFromLoginToken)$/i.test(operation);
- }catch{}
- let response;try{response=await crmFetch.apply(this,args);}catch(error){if(loginPending&&authRequest)loginFailure('Sign-in is unavailable. Please try again.');throw error;}
- if(loginPending&&authRequest){try{
-   const result=await response.clone().json();
-   if(result.data?.checkUserExists?.exists===false){
-    loginFailure();
-    // Keep an unknown hire on sign-in; never advance the native form to sign-up.
-    return new Response(JSON.stringify({errors:[{message:'Email or password is incorrect.'}]}),{status:200,headers:{'Content-Type':'application/json'}});
-   }
-   if(result.errors?.length)loginFailure();
- }catch{/* Native CRM handles non-JSON responses. */}}
- return response;
-};
-
-function advanceNativeLogin(){
- if(!loginPending||passwordSubmitted)return;
- const form=nativeForm(),password=form?.querySelector('input[placeholder="Password"],input[type=password]');
- if(!password)return;
- const submit=form.querySelector('[type=submit]');
- if(!submit||!/sign in/i.test(submit.textContent)){if(/sign up/i.test(submit?.textContent||''))loginFailure();return;}
- passwordSubmitted=true;
- nativeValue(form.querySelector('input[autocomplete=email],input[placeholder="Email"]'),login.querySelector('[name=email]').value.trim());
- nativeValue(password,login.querySelector('[name=password]').value);
- let checks=0;const finish=()=>{if(!loginPending)return;if(submit.disabled){if(++checks<40){setTimeout(finish,50);return;}loginFailure();return;}form.requestSubmit();};setTimeout(finish,50);
+async function signIn(form){
+ const controller=new AbortController();
+ loginTimer=setTimeout(()=>controller.abort(),20000);
+ const metadata=async(operationName,query,variables)=>{
+  const response=await fetch('/metadata',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},signal:controller.signal,body:JSON.stringify({operationName,query,variables})});
+  if(!response.ok)throw Error('unavailable');
+  const result=await response.json();
+  if(result.errors?.length)throw Error('credentials');
+  return result.data;
+ };
+ try{
+  const email=form.querySelector('[name=email]').value.trim(),origin=location.origin;
+  const user=await metadata('CheckUserExists','query CheckUserExists($email: String!) { checkUserExists(email: $email) { exists } }',{email});
+  if(user?.checkUserExists?.exists!==true)throw Error('credentials');
+  const credentials=await metadata('GetLoginTokenFromCredentials','mutation GetLoginTokenFromCredentials($email: String!, $password: String!, $origin: String!) { getLoginTokenFromCredentials(email: $email, password: $password, origin: $origin) { loginToken { token } } }',{email,password:form.querySelector('[name=password]').value,origin});
+  const loginToken=credentials?.getLoginTokenFromCredentials?.loginToken?.token;
+  if(typeof loginToken!=='string'||!loginToken)throw Error('credentials');
+  const result=await metadata('getAuthTokensFromLoginToken','mutation getAuthTokensFromLoginToken($loginToken: String!, $origin: String!) { getAuthTokensFromLoginToken(loginToken: $loginToken, origin: $origin) { tokens { __typename accessOrWorkspaceAgnosticToken { __typename token expiresAt } refreshToken { __typename token expiresAt } } } }',{loginToken,origin});
+  const pair=result?.getAuthTokensFromLoginToken?.tokens;
+  if(!pair||!['accessOrWorkspaceAgnosticToken','refreshToken'].every(k=>typeof pair[k]?.token==='string'&&pair[k].token))throw Error('credentials');
+  if(controller.signal.aborted)throw Error('unavailable');
+  // Store only the server-issued pair in the shape Twenty validates on boot.
+  localStorage.setItem('tokenPairState',JSON.stringify(pair));
+  if(form.querySelector('[type=checkbox]').checked){localStorage.removeItem('sd-session-only');sessionStorage.removeItem('sd-session-active');}
+  else{localStorage.setItem('sd-session-only','1');sessionStorage.setItem('sd-session-active','1');}
+  localStorage.setItem('sd-session-email',email);sessionStorage.setItem('sd-choose-workspace','1');
+  form.querySelector('[name=password]').value='';clearTimeout(loginTimer);
+  location.replace('/welcome');
+ }catch(error){
+  localStorage.removeItem('tokenPairState');sessionStorage.removeItem('sd-choose-workspace');
+  loginFailure(error.message==='credentials'?undefined:'Sign-in is unavailable. Please try again.');
+ }
 }
 function brandMark(){const b=el('div','sl-brand');b.innerHTML='<span class="sl-mark" aria-hidden="true">∪<i></i></span><span><strong>Unified Support</strong><small>CUSTOMER SUPPORT</small></span>';return b;}
 function mountLogin(){
@@ -602,13 +648,7 @@ function mountLogin(){
  const explain=t=>{info.hidden=false;info.textContent=t;};
  const forgot=button('Forgot password?',()=>{const reset=nativeControl(/^Forgot (your )?password\?$/i);if(reset){login.remove();login=null;document.body.classList.remove('sd-auth');authDelegated=true;reset.click();}else explain('Password reset is not available on this desk. Ask your company admin.');});form.querySelector('.sl-password-label').append(forgot);
  const submit=button('Sign in');submit.type='submit';submit.className='sl-submit';form.append(submit);
- form.onsubmit=e=>{e.preventDefault();if(loginPending)return;const native=nativeForm();if(!native){explain('Sign-in is still loading. Please try again.');return;}error.hidden=true;info.hidden=true;loginPending=true;passwordSubmitted=false;submit.disabled=true;
-  // Scope the existing CRM session to this browser tab when persistence is off.
-  if(form.querySelector('[type=checkbox]').checked){localStorage.removeItem('sd-session-only');}else{localStorage.setItem('sd-session-only','1');sessionStorage.setItem('sd-session-active','1');}
-  loginTimer=setTimeout(()=>loginFailure('Sign-in did not finish. Please try again.'),20000);
-  nativeValue(native.querySelector('input[autocomplete=email],input[placeholder="Email"]'),form.querySelector('[name=email]').value.trim());
-  if(native.querySelector('input[placeholder="Password"],input[type=password]'))advanceNativeLogin();else setTimeout(()=>{if(loginPending)native.requestSubmit();},0);
- };
+ form.onsubmit=e=>{e.preventDefault();if(loginPending)return;error.hidden=true;info.hidden=true;loginPending=true;submit.disabled=true;signIn(form);};
  card.append(form,el('div','sl-or','or'));const google=button('Continue with Google',()=>{const native=nativeControl(/^(Continue|Sign in) with Google$/i);if(native)native.click();else explain('Google sign-in is not connected on this desk.');},'sl-google');card.append(google,info,el('p','sl-invite','No account? Ask your company admin for an invite.'));
  const legal=el('div','sl-legal');for(const [name,re] of [['Privacy',/Privacy (Policy)?/i],['Terms',/Terms (of Service)?/i]]){if(legal.childNodes.length)legal.append(document.createTextNode(' · '));const a=button(name,()=>{const link=nativeControl(re);if(link)link.click();});legal.append(a);}card.append(legal);side.append(card);login.append(brand,side);document.body.append(login);document.body.classList.add('sd-auth');
 }
@@ -619,11 +659,11 @@ function syncLogin(){
  if(authDelegated&&!authPath())delegatedAway=true;
  if(authDelegated&&delegatedAway&&authPath()){authDelegated=false;delegatedAway=false;}
  const desk=document.querySelector('main.hired-desk');
- if(!desk&&host){host.remove();host=null;data=null;}if(desk){if(login){justSignedIn=loginPending;if(loginPending)localStorage.setItem('sd-session-email',login.querySelector('[name=email]').value.trim());login.remove();login=null;loginPending=false;clearTimeout(loginTimer);}document.body.classList.remove('sd-auth');return;}
- if(!authDelegated)mountLogin();advanceNativeLogin();
+ if(!desk&&host){host.remove();host=null;data=null;}if(desk){if(login){justSignedIn=justSignedIn||loginPending;if(loginPending)localStorage.setItem('sd-session-email',login.querySelector('[name=email]').value.trim());login.remove();login=null;loginPending=false;clearTimeout(loginTimer);}document.body.classList.remove('sd-auth');return;}
+ if(!authDelegated)mountLogin();
 }
 function chooseWorkspace(){
- if(!justSignedIn||!data||data.unavailable)return;justSignedIn=false;
+ if(!justSignedIn||!data||data.unavailable)return;justSignedIn=false;sessionStorage.removeItem('sd-choose-workspace');
  const connected=companies;
  const chooser=el('section','sl-workspaces');chooser.id='sd-workspaces';chooser.append(brandMark(),el('h1','','Choose a workspace'),el('p','','Choose a company desk.'));
  host.inert=true;chooser.setAttribute('role','dialog');chooser.setAttribute('aria-modal','true');chooser.setAttribute('aria-label','Choose a workspace');
@@ -636,7 +676,7 @@ html:has(body.sd-auth),html:has(#sd-workspaces),body:has(#sd-workspaces){overflo
 #sd-login * ,#sd-workspaces *{box-sizing:border-box}#sd-login{position:fixed;inset:0;height:100dvh;overflow:hidden;display:grid;grid-template-columns:620px minmax(0,1fr);z-index:2000}
 #sd-login button,#sd-workspaces button{font:inherit;cursor:pointer}#sd-login button:disabled{cursor:wait;opacity:.65}#sd-login [hidden]{display:none!important}
 .sl-panel{background:#1f3a5f;color:white;padding:56px;display:flex;flex-direction:column;min-height:0}.sl-brand{display:flex;align-items:center;gap:12px}.sl-brand strong{font-size:20px;letter-spacing:-.5px}.sl-brand small{display:block;font-size:10px;font-weight:600;letter-spacing:1px}.sl-mark{position:relative;width:40px;height:40px;background:white;color:#1f3a5f;border-radius:10px;text-align:center;font:bold 36px/36px Arial}.sl-mark i{position:absolute;width:6px;height:6px;background:#1f3a5f;border-radius:50%;left:18px;top:12px}
-.sl-story{margin-top:auto;padding-top:70px}.sl-story h1{font-size:40px;line-height:1.15;letter-spacing:-1px;max-width:420px;margin:0 0 22px}.sl-story p{font-size:16px;line-height:24px;color:#c9d6e8;margin:0 0 20px}.sl-pills{display:flex;gap:8px}.sl-pills span{padding:6px 12px;border-radius:20px;background:#ffffff20;font-size:12px;font-weight:600}.sl-story ul{padding:0;margin:54px 0 0;list-style:none;font-size:13px}.sl-story li{position:relative;padding-left:28px;margin-top:18px}.sl-story li:before{content:'✓';position:absolute;left:0;border-radius:50%;background:#2f7a4f;width:18px;height:18px;text-align:center;font-size:11px}
+.sl-story{margin-top:auto;padding-top:70px}.sl-story h1{font-size:40px;line-height:1.15;letter-spacing:-1px;max-width:420px;margin:0 0 22px}.sl-story p{font-size:16px;line-height:24px;color:#c9d6e8;margin:0 0 20px}.sl-pills{display:flex;flex-wrap:wrap;gap:8px}.sl-pills span{padding:6px 12px;border-radius:20px;background:#ffffff20;font-size:12px;font-weight:600}.sl-story ul{padding:0;margin:54px 0 0;list-style:none;font-size:13px}.sl-story li{position:relative;padding-left:28px;margin-top:18px}.sl-story li:before{content:'✓';position:absolute;left:0;border-radius:50%;background:#2f7a4f;width:18px;height:18px;text-align:center;font-size:11px}
 .sl-side{display:flex;align-items:center;justify-content:center;padding:36px}.sl-card{background:#fff;border:1px solid #dce2ec;border-radius:20px;padding:32px 36px 34px;width:440px;max-width:100%}.sl-card h2{font-size:28px;letter-spacing:-1px;line-height:36px;margin:0 0 12px}.sl-subtitle{margin:0 0 12px;color:#64748b}.sl-card label{display:block;font-size:12px;font-weight:600}.sl-card input:not([type=checkbox]){width:100%;height:45px;border:1px solid #dce2ec;border-radius:10px;background:white;padding:12px 14px;font:14px Inter,Arial,sans-serif;color:#1f3a5f;margin-top:4px}.sl-card input::placeholder{color:#64748b}.sl-password-label{display:flex;align-items:center;justify-content:space-between;margin-top:14px}.sl-password-label button,.sl-password button,.sl-legal button{border:0;background:none;padding:0;color:#2f5f8a;font-size:12px}.sl-password{position:relative}.sl-password input{padding-right:66px!important}.sl-password button{position:absolute;right:15px;top:17px}.sl-remember{display:flex!important;align-items:center;gap:8px;font-size:13px!important;font-weight:400!important;margin:16px 0}.sl-remember input{accent-color:#1f3a5f;width:18px;height:18px;margin:0}.sl-submit,.sl-google{width:100%;height:44px;border-radius:12px;border:1px solid #dce2ec;font-weight:600!important}.sl-submit{background:#1f3a5f;color:white;border:0}.sl-google{background:white;color:#1f3a5f}.sl-or{display:flex;align-items:center;gap:10px;color:#64748b;font-size:12px;margin:16px 0}.sl-or:before,.sl-or:after{content:'';height:1px;background:#dce2ec;flex:1}.sl-invite{text-align:center;font-size:12px;color:#64748b;margin:14px 0 0}.sl-legal{text-align:center;font-size:12px}.sl-error{background:#f6ddd8;border:1px solid #a63d2f;border-radius:8px;padding:12px;color:#a63d2f;font-size:13px;margin:20px 0}.sl-info{font-size:13px}.sl-workspaces{position:fixed;inset:0;z-index:2100;display:flex;align-items:center;justify-content:center;flex-direction:column;padding:36px;overflow:auto}.sl-workspaces h1{font-size:32px;margin:24px 0 8px}.sl-workspaces>.sl-brand .sl-mark{background:#1f3a5f;color:white}.sl-workspaces>.sl-brand .sl-mark i{background:white}.sl-all{position:relative;text-align:left;width:760px;max-width:100%;background:white;border:1px solid #dce2ec;border-radius:12px;padding:20px;margin:24px 0 16px}.sl-all strong,.sl-all span{display:block}.sl-all b{position:absolute;right:24px;top:30px}.sl-workspace-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:14px;max-width:760px;width:100%}.sl-workspace-grid button{border:1px solid #dce2ec;border-radius:12px;background:white;color:#1f3a5f;text-align:left;padding:20px}.sl-workspace-grid strong,.sl-workspace-grid small{display:block;margin:6px 0}.sl-workspace-grid span{display:block;font-size:12px}.sl-initial{font-size:20px!important;margin-bottom:16px;width:36px;height:36px;background:#e3e9f2;border-radius:8px;text-align:center;line-height:36px}.sl-workspace-grid .sl-role{display:inline-block;border-radius:12px;background:#e3e9f2;padding:2px 8px}.sl-open-count{margin-top:5px}
 @media(max-width:1100px){#sd-login{grid-template-columns:46% 54%}.sl-panel{padding:36px}.sl-side{padding:24px}.sl-card{padding:28px}.sl-story h1{font-size:36px}}@media(min-width:700px) and (max-height:800px){.sl-panel{padding:32px}.sl-story{padding-top:28px}.sl-story h1{font-size:34px}.sl-story ul{margin-top:28px}.sl-side{padding:20px}.sl-card{padding:24px 28px}}@media(max-width:699px){html:has(body.sd-auth),body.sd-auth{overflow:auto!important}#sd-login{position:absolute;display:block;height:auto;min-height:100dvh;overflow:visible}.sl-panel{min-height:0;padding:28px 24px}.sl-story{padding-top:42px}.sl-story h1{font-size:32px}.sl-story ul{margin-top:28px}.sl-side{padding:24px 16px}.sl-card{padding:28px 24px}.sl-workspaces{justify-content:flex-start;padding:28px 18px}.sl-workspace-grid{grid-template-columns:repeat(2,1fr)}.sl-workspaces h1{font-size:28px}.sl-workspaces>p{text-align:center}}
 
