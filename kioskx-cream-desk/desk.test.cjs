@@ -3,6 +3,7 @@ const {JSDOM}=require('/tmp/sales-desk-test-tools/node_modules/jsdom');
 const pause=()=>new Promise(r=>setTimeout(r,30));
 async function mount(options={}){const dom=new JSDOM('<main class="hired-desk"><nav aria-label="Views"><button>All inquiries</button></nav><div class="hired-workspace"><header class="hired-toolbar"><h1>Inquiries</h1></header><div class="hired-content"></div></div></main>',{url:'https://desk.invalid',runScripts:'outside-only'});const w=dom.window;if(options.timer){const interval=w.setInterval.bind(w);w.setInterval=(fn,ms)=>{if(ms===(options.timer.ms||15000)){options.timer.tick=fn;return 1;}return interval(fn,ms);};Object.defineProperty(w.document,'hidden',{value:false});}const observers=[];const Observer=w.MutationObserver;w.MutationObserver=class extends Observer{constructor(fn){super(fn);observers.push(this);}};w.localStorage.setItem('tokenPairState',JSON.stringify({accessOrWorkspaceAgnosticToken:{token:'fixture'}}));w.localStorage.setItem('currentUserState',JSON.stringify(options.user||{firstName:'Test',lastName:'Hire',email:'fixture@example.invalid'}));const nativeSignOut=w.document.createElement('button');nativeSignOut.className='hired-signout';nativeSignOut.textContent='Sign out';nativeSignOut.onclick=()=>{w.nativeSignOutCalls=(w.nativeSignOutCalls||0)+1;w.localStorage.removeItem('tokenPairState');w.localStorage.removeItem('currentUserState');w.document.querySelector('main.hired-desk').remove();w.history.replaceState({},'','/welcome');};w.document.querySelector('main.hired-desk').append(nativeSignOut);const calls=[];const queues={};for(const q of ['cleaning','cars','jobs','kiosk'])queues[q]={rows:options.empty?[]:[{id:q,label:q==='kiosk'&&options.pastedName?'Email: fixture@example.invalid Phone: +12025550100':'Fixture customer',email:'fixture@example.invalid',phone:'+12025550100',summary:'Request',message:'Please help',fields:[['Service','Deep clean'],['Bedrooms','3'],['Bathrooms','2'],['ZIP','78702'],['Message','Please help']],appointmentDate:'1 Dec 2026',thread:[...(options.incoming?[{kind:'email',direction:'inbound',status:'received',text:'Customer reply',time:new Date().toISOString()},{kind:'sms',direction:'inbound',status:'received',text:'Customer text',time:new Date().toISOString()}]:[]),{kind:'email',status:'sent',text:'Reply stored',time:new Date().toISOString()}]}]};w.fetch=async(url,o)=>{calls.push({url,method:o?.method,body:o?.body});
 if(String(url).includes('/kioskx-hired-desk/calendar')&&o?.method==='POST')return {ok:true,json:async()=>({connected:true,saved:true})};if(String(url).includes('/calendar?')){const body=options.calendar?options.calendar(url):{connected:false,events:[]};if(body?.httpStatus)return {ok:false,status:body.httpStatus,json:async()=>({})};return {ok:true,json:async()=>body};}
+if(String(url).includes('/applications?')&&options.applicationRead)return options.applicationRead(url,o);
 if(String(url).includes('/applications?'))return {ok:true,json:async()=>({applications:options.applications||[]})};
 if(String(url).includes('crew-'))return {ok:true,json:async()=>String(url).includes('crew-assign')?{ok:true}:{jobs:options.crewJobs||[]}};
 if(String(url).includes('company-mail')){if(options.mail)return options.mail(url,o);const company=new URL(url,'https://fixture.invalid').searchParams.get('company');const conversation=new URL(url,'https://fixture.invalid').searchParams.get('conversation');return {ok:true,json:async()=>conversation?{messages:[{id:1,text:'Please help with this order',direction:'received'}]}:{conversations:options.empty?[]:[{id:1,name:company+' customer',preview:company+' message',status:'open'}]}};}
@@ -185,3 +186,39 @@ test('Timed out sign-in clears password and enables retry without opening desk',
 test('Incomplete token pair cannot open the desk or persist a broken session',async()=>{const m=await mountLoginFixture({invalidPair:true});try{await m.submit();assert.equal(m.w.localStorage.getItem('tokenPairState'),null);assert.equal(m.d.querySelector('.sd-rail'),null);assert.equal(m.d.querySelector('#sl-password').value,'');}finally{m.close();}});
 test('Repeated presses while pending perform only one credential exchange',async()=>{const m=await mountLoginFixture();try{const pending=m.submit();m.d.querySelector('#sd-login form').requestSubmit();await pending;assert.equal(m.calls.filter(c=>c.body?.operationName==='GetLoginTokenFromCredentials').length,1);assert.ok(m.d.querySelector('.sd-rail'));}finally{m.close();}});
 test('Tab-only session expires on a new tab but survives the active tab reload',async()=>{for(const activeTab of [false,true]){const m=await mountLoginFixture({sessionOnly:true,activeTab});try{assert.equal(m.w.localStorage.getItem('tokenPairState'),activeTab?'{}':null);}finally{m.close();}}});
+
+test('Indeed mail becomes the same Jobs, Today and Queues count without first opening Jobs',async()=>{
+ const jobs=require('./desk-applications');
+ const applicant=jobs.indeedRow({id:991,meta:{sender:{email:'applicants@indeedemail.com'}}},{created_at:1700000000,content:'Fixture Applicant applied to the Quality Test Engineer position posted on Indeed.\nName: Fixture Applicant'});
+ const m=await mount({applications:[applicant]});
+ try {
+  choose(m,'AniDeeBee');m.w.kxOpenQueue('today');await pause();
+  assert.match(m.d.querySelector('.sd-jobs-count').textContent,/2 open job applications/);
+  assert.ok([...m.d.querySelectorAll('.sd-row')].some(r=>r.textContent.includes('Fixture Applicant')));
+  assert.equal(m.w.kxQueueCounts.jobs,2);
+  m.w.kxOpenQueue('queues');await pause();
+  const jobCard=[...m.d.querySelectorAll('.sd-grid .sd-card')].find(c=>c.querySelector('h3')?.textContent==='Jobs');assert.match(jobCard.textContent,/2 New/);
+  m.w.kxOpenQueue('jobs');await pause();assert.equal(m.d.querySelectorAll('.sd-list .sd-row').length,2);assert.match(m.d.querySelector('.sd-subtitle').textContent,/2 open/);
+  assert.equal(m.calls.filter(c=>c.method==='POST').length,0);
+ }finally{m.close();}
+});
+test('Saved applications paint while Indeed waits; arrival rerenders Today and counts',async()=>{
+ let release;const pending=new Promise(r=>{release=r;});
+ const m=await mount({applicationRead:async url=>url.includes('source=indeed')?pending:{ok:true,json:async()=>({applications:[{id:'saved-extra',label:'Saved person',queue:'jobs',summary:'Driver'}]})}});
+ try {
+  choose(m,'AniDeeBee');m.w.kxOpenQueue('today');await pause();
+  assert.equal(m.w.kxQueueCounts.jobs,2);assert.match(m.d.body.textContent,/Loading Indeed applications/);
+  release({ok:true,json:async()=>({applications:[{id:'indeed:7',label:'Indeed person',queue:'jobs',summary:'Cleaner'}]})});await pause();
+  assert.equal(m.w.kxQueueCounts.jobs,3);assert.match(m.d.querySelector('.sd-jobs-count').textContent,/3 open/);assert.doesNotMatch(m.d.body.textContent,/Loading Indeed applications/);
+  m.w.kxOpenQueue('jobs');await pause();assert.equal(m.d.querySelectorAll('.sd-list .sd-row').length,3);
+ }finally{m.close();}
+});
+test('Failed Indeed request repaints honest source warning and preserves saved rows across views',async()=>{
+ const m=await mount({applicationRead:async url=>{if(url.includes('source=indeed'))throw Error('fixture outage');return {ok:true,json:async()=>({applications:[]})};}});
+ try {
+  choose(m,'AniDeeBee');
+  for(const q of ['jobs','today','queues']){m.w.kxOpenQueue(q);await pause();assert.match(m.d.body.textContent,/Indeed applications could not be loaded. Showing the applications saved on the desk./);}
+  m.w.kxOpenQueue('jobs');await pause();assert.equal(m.d.querySelectorAll('.sd-list .sd-row').length,1);assert.equal(m.w.kxQueueCounts.jobs,1);assert.ok(button(m.d,'Retry Indeed'));
+  choose(m,'Kiosk X');m.w.kxOpenQueue('today');await pause();assert.doesNotMatch(m.d.body.textContent,/Indeed applications/);
+ }finally{m.close();}
+});
