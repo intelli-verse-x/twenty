@@ -543,49 +543,48 @@ window.kxQueueCounts=null;window.kxOpenQueue=k=>navigate(names[k]?k:'inbox');
 function hashArticle(){const m=location.hash.match(/^#desk-article=(\d+)$/);if(m&&articles[Number(m[1])]){article=Number(m[1]);navigate('knowledge');}}window.addEventListener('hashchange',hashArticle);
 function start(){if(!document.documentElement)return;const desk=document.querySelector('main.hired-desk');if(host&&!host.isConnected)host=null;if(!desk||host)return;host=el('div');host.id='support-desk';desk.append(host);hashArticle();render();api('queues').then(d=>{data=d;window.kxQueueCounts=Object.fromEntries(Object.keys(names).map(k=>[k,rows().filter(r=>r.queue===k).length]));render();chooseWorkspace();}).catch(()=>{data={unavailable:true};window.kxQueueCounts={};render();});}
 new MutationObserver(start).observe(document.documentElement,{childList:true,subtree:true});start();
-// The visible form drives Twenty's own form; Twenty alone signs in, stores and
-// refreshes its token pair, checks hired access, and mounts main.hired-desk.
-let login=null,loginPending=false,passwordSubmitted=false,loginTimer=null,justSignedIn=false;
+// Twenty authenticates directly, even before its native form has mounted.
+let login=null,loginPending=false,loginTimer=null;
+let justSignedIn=sessionStorage.getItem('sd-choose-workspace')==='1';
 const authPath=()=>location.pathname==='/'||location.pathname==='/welcome'||location.pathname.startsWith('/welcome/');
-const nativeForm=()=>[...document.querySelectorAll('form')].find(f=>!f.closest('#sd-login')&&f.querySelector('input[autocomplete="email"],input[placeholder="Email"]'));
 const nativeControl=re=>[...document.querySelectorAll('button,a')].find(e=>!e.closest('#sd-login')&&re.test(e.textContent.trim()));
-function nativeValue(input,value){if(!input)return;Object.getOwnPropertyDescriptor(HTMLInputElement.prototype,'value').set.call(input,value);input.dispatchEvent(new Event('input',{bubbles:true}));input.dispatchEvent(new Event('change',{bubbles:true}));}
 function loginFailure(message='Email or password is incorrect. Try again or reset your password.'){
- if(!login)return;loginPending=false;passwordSubmitted=false;clearTimeout(loginTimer);
+ if(!login)return;loginPending=false;clearTimeout(loginTimer);
  const password=login.querySelector('[name=password]');password.value='';password.type='password';login.querySelector('[data-show]').setAttribute('aria-pressed','false');
- nativeValue(nativeForm()?.querySelector('input[placeholder="Password"],input[type=password]'),'');
  const error=login.querySelector('[role=alert]');error.textContent=message;error.hidden=false;login.querySelector('[type=submit]').disabled=false;
 }
-// Watch only auth results, without reading/storing credentials or token values.
-const crmFetch=window.fetch;
-window.fetch=async function(...args){
- let authRequest=false;
- try{const url=typeof args[0]==='string'?args[0]:args[0]?.url;const operation=typeof args[1]?.body==='string'?JSON.parse(args[1].body).operationName:'';
-  authRequest=!!url&&new URL(url,location.origin).pathname==='/metadata'&&/^(CheckUserExists|SignIn|GetLoginTokenFromCredentials|GetAuthTokensFromLoginToken)$/i.test(operation);
- }catch{}
- let response;try{response=await crmFetch.apply(this,args);}catch(error){if(loginPending&&authRequest)loginFailure('Sign-in is unavailable. Please try again.');throw error;}
- if(loginPending&&authRequest){try{
-   const result=await response.clone().json();
-   if(result.data?.checkUserExists?.exists===false){
-    loginFailure();
-    // Keep an unknown hire on sign-in; never advance the native form to sign-up.
-    return new Response(JSON.stringify({errors:[{message:'Email or password is incorrect.'}]}),{status:200,headers:{'Content-Type':'application/json'}});
-   }
-   if(result.errors?.length)loginFailure();
- }catch{/* Native CRM handles non-JSON responses. */}}
- return response;
-};
-
-function advanceNativeLogin(){
- if(!loginPending||passwordSubmitted)return;
- const form=nativeForm(),password=form?.querySelector('input[placeholder="Password"],input[type=password]');
- if(!password)return;
- const submit=form.querySelector('[type=submit]');
- if(!submit||!/sign in/i.test(submit.textContent)){if(/sign up/i.test(submit?.textContent||''))loginFailure();return;}
- passwordSubmitted=true;
- nativeValue(form.querySelector('input[autocomplete=email],input[placeholder="Email"]'),login.querySelector('[name=email]').value.trim());
- nativeValue(password,login.querySelector('[name=password]').value);
- let checks=0;const finish=()=>{if(!loginPending)return;if(submit.disabled){if(++checks<40){setTimeout(finish,50);return;}loginFailure();return;}form.requestSubmit();};setTimeout(finish,50);
+async function signIn(form){
+ const controller=new AbortController();
+ loginTimer=setTimeout(()=>controller.abort(),20000);
+ const metadata=async(operationName,query,variables)=>{
+  const response=await fetch('/metadata',{method:'POST',credentials:'same-origin',headers:{'Content-Type':'application/json'},signal:controller.signal,body:JSON.stringify({operationName,query,variables})});
+  if(!response.ok)throw Error('unavailable');
+  const result=await response.json();
+  if(result.errors?.length)throw Error('credentials');
+  return result.data;
+ };
+ try{
+  const email=form.querySelector('[name=email]').value.trim(),origin=location.origin;
+  const user=await metadata('CheckUserExists','query CheckUserExists($email: String!) { checkUserExists(email: $email) { exists } }',{email});
+  if(user?.checkUserExists?.exists!==true)throw Error('credentials');
+  const credentials=await metadata('GetLoginTokenFromCredentials','mutation GetLoginTokenFromCredentials($email: String!, $password: String!, $origin: String!) { getLoginTokenFromCredentials(email: $email, password: $password, origin: $origin) { loginToken { token } } }',{email,password:form.querySelector('[name=password]').value,origin});
+  const loginToken=credentials?.getLoginTokenFromCredentials?.loginToken?.token;
+  if(typeof loginToken!=='string'||!loginToken)throw Error('credentials');
+  const result=await metadata('getAuthTokensFromLoginToken','mutation getAuthTokensFromLoginToken($loginToken: String!, $origin: String!) { getAuthTokensFromLoginToken(loginToken: $loginToken, origin: $origin) { tokens { __typename accessOrWorkspaceAgnosticToken { __typename token expiresAt } refreshToken { __typename token expiresAt } } } }',{loginToken,origin});
+  const pair=result?.getAuthTokensFromLoginToken?.tokens;
+  if(!pair||!['accessOrWorkspaceAgnosticToken','refreshToken'].every(k=>typeof pair[k]?.token==='string'&&pair[k].token))throw Error('credentials');
+  if(controller.signal.aborted)throw Error('unavailable');
+  // Store only the server-issued pair in the shape Twenty validates on boot.
+  localStorage.setItem('tokenPairState',JSON.stringify(pair));
+  if(form.querySelector('[type=checkbox]').checked){localStorage.removeItem('sd-session-only');sessionStorage.removeItem('sd-session-active');}
+  else{localStorage.setItem('sd-session-only','1');sessionStorage.setItem('sd-session-active','1');}
+  localStorage.setItem('sd-session-email',email);sessionStorage.setItem('sd-choose-workspace','1');
+  form.querySelector('[name=password]').value='';clearTimeout(loginTimer);
+  location.replace('/welcome');
+ }catch(error){
+  localStorage.removeItem('tokenPairState');sessionStorage.removeItem('sd-choose-workspace');
+  loginFailure(error.message==='credentials'?undefined:'Sign-in is unavailable. Please try again.');
+ }
 }
 function brandMark(){const b=el('div','sl-brand');b.innerHTML='<span class="sl-mark" aria-hidden="true">∪<i></i></span><span><strong>Unified Support</strong><small>CUSTOMER SUPPORT</small></span>';return b;}
 function mountLogin(){
@@ -602,13 +601,7 @@ function mountLogin(){
  const explain=t=>{info.hidden=false;info.textContent=t;};
  const forgot=button('Forgot password?',()=>{const reset=nativeControl(/^Forgot (your )?password\?$/i);if(reset){login.remove();login=null;document.body.classList.remove('sd-auth');authDelegated=true;reset.click();}else explain('Password reset is not available on this desk. Ask your company admin.');});form.querySelector('.sl-password-label').append(forgot);
  const submit=button('Sign in');submit.type='submit';submit.className='sl-submit';form.append(submit);
- form.onsubmit=e=>{e.preventDefault();if(loginPending)return;const native=nativeForm();if(!native){explain('Sign-in is still loading. Please try again.');return;}error.hidden=true;info.hidden=true;loginPending=true;passwordSubmitted=false;submit.disabled=true;
-  // Scope the existing CRM session to this browser tab when persistence is off.
-  if(form.querySelector('[type=checkbox]').checked){localStorage.removeItem('sd-session-only');}else{localStorage.setItem('sd-session-only','1');sessionStorage.setItem('sd-session-active','1');}
-  loginTimer=setTimeout(()=>loginFailure('Sign-in did not finish. Please try again.'),20000);
-  nativeValue(native.querySelector('input[autocomplete=email],input[placeholder="Email"]'),form.querySelector('[name=email]').value.trim());
-  if(native.querySelector('input[placeholder="Password"],input[type=password]'))advanceNativeLogin();else setTimeout(()=>{if(loginPending)native.requestSubmit();},0);
- };
+ form.onsubmit=e=>{e.preventDefault();if(loginPending)return;error.hidden=true;info.hidden=true;loginPending=true;submit.disabled=true;signIn(form);};
  card.append(form,el('div','sl-or','or'));const google=button('Continue with Google',()=>{const native=nativeControl(/^(Continue|Sign in) with Google$/i);if(native)native.click();else explain('Google sign-in is not connected on this desk.');},'sl-google');card.append(google,info,el('p','sl-invite','No account? Ask your company admin for an invite.'));
  const legal=el('div','sl-legal');for(const [name,re] of [['Privacy',/Privacy (Policy)?/i],['Terms',/Terms (of Service)?/i]]){if(legal.childNodes.length)legal.append(document.createTextNode(' · '));const a=button(name,()=>{const link=nativeControl(re);if(link)link.click();});legal.append(a);}card.append(legal);side.append(card);login.append(brand,side);document.body.append(login);document.body.classList.add('sd-auth');
 }
@@ -619,11 +612,11 @@ function syncLogin(){
  if(authDelegated&&!authPath())delegatedAway=true;
  if(authDelegated&&delegatedAway&&authPath()){authDelegated=false;delegatedAway=false;}
  const desk=document.querySelector('main.hired-desk');
- if(!desk&&host){host.remove();host=null;data=null;}if(desk){if(login){justSignedIn=loginPending;if(loginPending)localStorage.setItem('sd-session-email',login.querySelector('[name=email]').value.trim());login.remove();login=null;loginPending=false;clearTimeout(loginTimer);}document.body.classList.remove('sd-auth');return;}
- if(!authDelegated)mountLogin();advanceNativeLogin();
+ if(!desk&&host){host.remove();host=null;data=null;}if(desk){if(login){justSignedIn=justSignedIn||loginPending;if(loginPending)localStorage.setItem('sd-session-email',login.querySelector('[name=email]').value.trim());login.remove();login=null;loginPending=false;clearTimeout(loginTimer);}document.body.classList.remove('sd-auth');return;}
+ if(!authDelegated)mountLogin();
 }
 function chooseWorkspace(){
- if(!justSignedIn||!data||data.unavailable)return;justSignedIn=false;
+ if(!justSignedIn||!data||data.unavailable)return;justSignedIn=false;sessionStorage.removeItem('sd-choose-workspace');
  const connected=companies;
  const chooser=el('section','sl-workspaces');chooser.id='sd-workspaces';chooser.append(brandMark(),el('h1','','Choose a workspace'),el('p','','Choose a company desk.'));
  host.inert=true;chooser.setAttribute('role','dialog');chooser.setAttribute('aria-modal','true');chooser.setAttribute('aria-label','Choose a workspace');
@@ -636,7 +629,7 @@ html:has(body.sd-auth),html:has(#sd-workspaces),body:has(#sd-workspaces){overflo
 #sd-login * ,#sd-workspaces *{box-sizing:border-box}#sd-login{position:fixed;inset:0;height:100dvh;overflow:hidden;display:grid;grid-template-columns:620px minmax(0,1fr);z-index:2000}
 #sd-login button,#sd-workspaces button{font:inherit;cursor:pointer}#sd-login button:disabled{cursor:wait;opacity:.65}#sd-login [hidden]{display:none!important}
 .sl-panel{background:#1f3a5f;color:white;padding:56px;display:flex;flex-direction:column;min-height:0}.sl-brand{display:flex;align-items:center;gap:12px}.sl-brand strong{font-size:20px;letter-spacing:-.5px}.sl-brand small{display:block;font-size:10px;font-weight:600;letter-spacing:1px}.sl-mark{position:relative;width:40px;height:40px;background:white;color:#1f3a5f;border-radius:10px;text-align:center;font:bold 36px/36px Arial}.sl-mark i{position:absolute;width:6px;height:6px;background:#1f3a5f;border-radius:50%;left:18px;top:12px}
-.sl-story{margin-top:auto;padding-top:70px}.sl-story h1{font-size:40px;line-height:1.15;letter-spacing:-1px;max-width:420px;margin:0 0 22px}.sl-story p{font-size:16px;line-height:24px;color:#c9d6e8;margin:0 0 20px}.sl-pills{display:flex;gap:8px}.sl-pills span{padding:6px 12px;border-radius:20px;background:#ffffff20;font-size:12px;font-weight:600}.sl-story ul{padding:0;margin:54px 0 0;list-style:none;font-size:13px}.sl-story li{position:relative;padding-left:28px;margin-top:18px}.sl-story li:before{content:'✓';position:absolute;left:0;border-radius:50%;background:#2f7a4f;width:18px;height:18px;text-align:center;font-size:11px}
+.sl-story{margin-top:auto;padding-top:70px}.sl-story h1{font-size:40px;line-height:1.15;letter-spacing:-1px;max-width:420px;margin:0 0 22px}.sl-story p{font-size:16px;line-height:24px;color:#c9d6e8;margin:0 0 20px}.sl-pills{display:flex;flex-wrap:wrap;gap:8px}.sl-pills span{padding:6px 12px;border-radius:20px;background:#ffffff20;font-size:12px;font-weight:600}.sl-story ul{padding:0;margin:54px 0 0;list-style:none;font-size:13px}.sl-story li{position:relative;padding-left:28px;margin-top:18px}.sl-story li:before{content:'✓';position:absolute;left:0;border-radius:50%;background:#2f7a4f;width:18px;height:18px;text-align:center;font-size:11px}
 .sl-side{display:flex;align-items:center;justify-content:center;padding:36px}.sl-card{background:#fff;border:1px solid #dce2ec;border-radius:20px;padding:32px 36px 34px;width:440px;max-width:100%}.sl-card h2{font-size:28px;letter-spacing:-1px;line-height:36px;margin:0 0 12px}.sl-subtitle{margin:0 0 12px;color:#64748b}.sl-card label{display:block;font-size:12px;font-weight:600}.sl-card input:not([type=checkbox]){width:100%;height:45px;border:1px solid #dce2ec;border-radius:10px;background:white;padding:12px 14px;font:14px Inter,Arial,sans-serif;color:#1f3a5f;margin-top:4px}.sl-card input::placeholder{color:#64748b}.sl-password-label{display:flex;align-items:center;justify-content:space-between;margin-top:14px}.sl-password-label button,.sl-password button,.sl-legal button{border:0;background:none;padding:0;color:#2f5f8a;font-size:12px}.sl-password{position:relative}.sl-password input{padding-right:66px!important}.sl-password button{position:absolute;right:15px;top:17px}.sl-remember{display:flex!important;align-items:center;gap:8px;font-size:13px!important;font-weight:400!important;margin:16px 0}.sl-remember input{accent-color:#1f3a5f;width:18px;height:18px;margin:0}.sl-submit,.sl-google{width:100%;height:44px;border-radius:12px;border:1px solid #dce2ec;font-weight:600!important}.sl-submit{background:#1f3a5f;color:white;border:0}.sl-google{background:white;color:#1f3a5f}.sl-or{display:flex;align-items:center;gap:10px;color:#64748b;font-size:12px;margin:16px 0}.sl-or:before,.sl-or:after{content:'';height:1px;background:#dce2ec;flex:1}.sl-invite{text-align:center;font-size:12px;color:#64748b;margin:14px 0 0}.sl-legal{text-align:center;font-size:12px}.sl-error{background:#f6ddd8;border:1px solid #a63d2f;border-radius:8px;padding:12px;color:#a63d2f;font-size:13px;margin:20px 0}.sl-info{font-size:13px}.sl-workspaces{position:fixed;inset:0;z-index:2100;display:flex;align-items:center;justify-content:center;flex-direction:column;padding:36px;overflow:auto}.sl-workspaces h1{font-size:32px;margin:24px 0 8px}.sl-workspaces>.sl-brand .sl-mark{background:#1f3a5f;color:white}.sl-workspaces>.sl-brand .sl-mark i{background:white}.sl-all{position:relative;text-align:left;width:760px;max-width:100%;background:white;border:1px solid #dce2ec;border-radius:12px;padding:20px;margin:24px 0 16px}.sl-all strong,.sl-all span{display:block}.sl-all b{position:absolute;right:24px;top:30px}.sl-workspace-grid{display:grid;grid-template-columns:repeat(2,1fr);gap:14px;max-width:760px;width:100%}.sl-workspace-grid button{border:1px solid #dce2ec;border-radius:12px;background:white;color:#1f3a5f;text-align:left;padding:20px}.sl-workspace-grid strong,.sl-workspace-grid small{display:block;margin:6px 0}.sl-workspace-grid span{display:block;font-size:12px}.sl-initial{font-size:20px!important;margin-bottom:16px;width:36px;height:36px;background:#e3e9f2;border-radius:8px;text-align:center;line-height:36px}.sl-workspace-grid .sl-role{display:inline-block;border-radius:12px;background:#e3e9f2;padding:2px 8px}.sl-open-count{margin-top:5px}
 @media(max-width:1100px){#sd-login{grid-template-columns:46% 54%}.sl-panel{padding:36px}.sl-side{padding:24px}.sl-card{padding:28px}.sl-story h1{font-size:36px}}@media(min-width:700px) and (max-height:800px){.sl-panel{padding:32px}.sl-story{padding-top:28px}.sl-story h1{font-size:34px}.sl-story ul{margin-top:28px}.sl-side{padding:20px}.sl-card{padding:24px 28px}}@media(max-width:699px){html:has(body.sd-auth),body.sd-auth{overflow:auto!important}#sd-login{position:absolute;display:block;height:auto;min-height:100dvh;overflow:visible}.sl-panel{min-height:0;padding:28px 24px}.sl-story{padding-top:42px}.sl-story h1{font-size:32px}.sl-story ul{margin-top:28px}.sl-side{padding:24px 16px}.sl-card{padding:28px 24px}.sl-workspaces{justify-content:flex-start;padding:28px 18px}.sl-workspace-grid{grid-template-columns:repeat(2,1fr)}.sl-workspaces h1{font-size:28px}.sl-workspaces>p{text-align:center}}
 
