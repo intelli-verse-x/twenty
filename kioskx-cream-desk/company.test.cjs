@@ -23,3 +23,9 @@ test('AniDeeBee lead and consented SMS keep their own identity; India sends noth
  assert.equal((await engagementSend({company:'AniDeeBee',kind:'sms',phone:'+919876543210',smsConsent:true,text:'Hello'},deps)).status,'blocked');assert.equal(sent.length,2);
 });
 test('AniDeeBee replies on its mailbox conversation and reports a rejected send',async()=>{let post;const input={company:'AniDeeBee',conversation:9,text:'Fixture reply'};const api=async(path,body)=>{if(body){post={path,body};return {id:20,status:'sent'};}return {inbox_id:3};};assert.equal((await mailReply(input,{api,repo:ledger()})).status,'accepted');assert.equal(post.path,'/api/v1/accounts/1/conversations/9/messages');assert.deepEqual(post.body,{content:'Fixture reply',message_type:'outgoing',private:false});const fail=async(path,body)=>{if(body){const e=Error();e.httpStatus=422;throw e;}return {inbox_id:3};};const result=await mailReply(input,{api:fail,repo:ledger()});assert.equal(result.status,'failed');assert.match(result.message,/not sent/);});
+
+test('company mailbox exposes subject and sender, excludes other inboxes, masks Kiosk contacts',async()=>{
+ const api=async()=>({data:{payload:[{id:1,inbox_id:3,additional_attributes:{mail_subject:'Schedule question'},meta:{sender:{name:'Sender',email:'sender@example.invalid'}},messages:[{content:'Mail body'}]},{id:2,inbox_id:101,additional_attributes:{mail_subject:'Email person@example.invalid'},meta:{sender:{email:'person@example.invalid'}}}]}});
+ const r=await mailRead({company:'AniDeeBee'},{api});assert.equal(r.conversations.length,1);assert.equal(r.conversations[0].subject,'Schedule question');assert.equal(r.conversations[0].sender,'sender@example.invalid');
+ const k=await mailRead({company:'Kiosk X'},{api});assert.equal(k.conversations.length,1);assert.doesNotMatch(JSON.stringify(k),/person@example/);
+});

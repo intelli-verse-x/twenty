@@ -1,7 +1,7 @@
 const crypto = require('node:crypto');
 const {Client} = require('pg');
 const {parsePhoneNumberFromString} = require('libphonenumber-js');
-const labels = {cleaning:'Cleaning request',cars:'Cars request',jobs:'Jobs request',kiosk:'Kiosk inquiry'};
+const labels = {cleaning:'Cleaning request',cars:'Cars request',jobs:'Jobs request',turo:'Turo guest request',kiosk:'Kiosk inquiry'};
 const message = {email:'Email sent',sms:'Text sent',call:'Call queued on Google Voice.'};
 const failure = {email:'Email was not sent.',sms:'Text was not sent.',call:'Call was not queued.'};
 const sender = () => process.env.TELNYX_FROM_NUMBER || process.env.KIOSKX_VOICE_FROM_NUMBER || '';
@@ -59,8 +59,18 @@ const operationId = key => `${key.slice(0,8)}-${key.slice(8,12)}-4${key.slice(13
 async function reconcile(repo,id,desk) {
  const thread=await repo.thread(id);
  if(!desk)return thread;
- for(const entry of thread.filter(e=>e.kind==='call'&&e.status==='queued')) {
+ for(const entry of thread.filter(e=>e.kind==='call'&&!e.transcript)) {
   const note=await desk.system(async()=> (await desk.repo('note')).findOne({where:{id:operationId(entry.key)}}));
+  const transcriptHash=crypto.createHash('sha256').update('voice-transcript:'+operationId(entry.key)).digest('hex');
+  const transcriptId=operationId(transcriptHash);
+  const speech=await desk.system(async()=> (await desk.repo('note')).findOne({where:{id:transcriptId}}));
+  const match=speech?.title==='KioskX Google Voice transcript'&&speech.bodyV2?.markdown?.match(/^Source: https:\/\/(?:voice\.google\.com|drive\.google\.com)\/[^\r\n]*\nCall: ([a-f0-9-]{36})\n\n([\s\S]+)$/i);
+  if(match&&match[1]===operationId(entry.key)&&match[2].trim()){
+   const {text,time,...meta}=entry;
+   await repo.finish(entry.key,{...meta,transcript:match[2],status:'completed',message:'Call transcript saved.'});
+   continue;
+  }
+  if(entry.status!=='queued')continue;
   let status,copy;
   if(note?.title==='KioskX Google Voice queued') {
    let payload={};try{payload=JSON.parse(note.bodyV2?.markdown||'{}');}catch{}

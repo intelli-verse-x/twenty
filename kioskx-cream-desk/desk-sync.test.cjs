@@ -38,7 +38,7 @@ async function mount(width){
 for(const width of [1440,390,375])test(`desk at ${width}: candidates, failed sync date, trip and inbox; no send`,async()=>{
  const m=await mount(width);try{
  m.w.kxOpenQueue('jobs');await pause();for(const name of expected)assert.ok(m.d.body.textContent.includes(name));assert.ok(m.d.body.textContent.includes('Existing form applicant'));assert.match(m.d.body.textContent,/Snapshot read 20 Nov 2026/);
- m.w.kxOpenQueue('call');await pause();assert.equal([...m.d.querySelectorAll('.sd-call-person')].filter(c=>expected.some(n=>c.textContent.includes(n))).length,6);assert.match(m.d.body.textContent,/No phone number on this application/);
+ m.w.kxOpenQueue('call');await pause();assert.equal([...m.d.querySelectorAll('.sd-call-owners .sd-row')].filter(c=>expected.some(n=>c.textContent.includes(n))).length,6);m.d.querySelector('.sd-call-owners .sd-row').click();assert.match(m.d.body.textContent,/No transcript yet/);
  m.w.kxOpenQueue('turo');assert.equal(m.d.querySelectorAll('.sd-fleet-car').length,4);assert.match(m.d.body.textContent,/Svetozar/);assert.equal([...m.d.querySelectorAll('.sd-fleet-car')].filter(c=>c.textContent.includes('No current trip')).length,3);
  assert.equal(m.d.querySelectorAll('[aria-label="Turo inbox threads"] .sd-row').length,14);assert.match(m.d.body.textContent,/Showing the last saved snapshot/);
  m.d.querySelector('[aria-label="Turo inbox threads"] .sd-row').click();assert.match(m.d.querySelector('.sd-fleet-thread').textContent,/Anil/);assert.ok(m.d.querySelector('.sd-fleet-thread textarea'));assert.equal(m.d.querySelector('.sd-fleet-send').disabled,true);assert.equal(m.calls.filter(c=>c.options.method==='POST').length,0);
@@ -92,14 +92,17 @@ test('browser is enabled by default; explicit operator pause remains configurabl
  await assert.rejects(browserDesk.request('read',{source:'indeed'},{DESK_BROWSER_ENABLED:'false'},transport));assert.equal(reads,1);
 });
 
-for(const width of [1440,390,375])test(`signed-in company first paint at ${width} contains exact candidate and trip identities`,async()=>{
+for(const width of [1440,390,375])test(`signed-in company at ${width} keeps candidate and trip identities on owning pages`,async()=>{
  const m=await mount(width);try{
-  const overview=m.d.querySelector('[aria-label="Indeed and Turo conversations"]');assert.ok(overview);
-  for(const id of ['5fe434c2fb5a','2500e6671d40','95ab7507c35c','cd8dbb747410','f36cc544ea2e','47b26f49a7b9','63056209'])assert.ok(overview.querySelector(`[data-thread-id="${id}"]`));
-  overview.querySelector('[data-thread-id="63056209"]').click();
-  assert.equal(overview.querySelector('.sd-source-thread').dataset.threadUrl,'https://turo.com/us/en/inbox/messages/thread/63056209');
+  assert.equal(m.d.querySelector('[aria-label="Indeed and Turo conversations"]'),null);
+  assert.doesNotMatch(m.d.querySelector('.sd-mail').textContent,/Indeed applications|Svetozar/);
+  m.w.kxOpenQueue('jobs');await pause();
+  for(const id of ['5fe434c2fb5a','2500e6671d40','95ab7507c35c','cd8dbb747410','f36cc544ea2e','47b26f49a7b9'])assert.ok(m.d.querySelector(`[data-thread-id="${id}"]`));
+  assert.equal(m.d.querySelector('[data-thread-id="63056209"]'),null);
+  m.w.kxOpenQueue('turo');m.d.querySelector('[data-thread-id="63056209"]').click();
+  assert.equal(m.d.querySelector('.sd-fleet-thread').dataset.threadUrl,'https://turo.com/us/en/inbox/messages/thread/63056209');
   assert.equal(m.calls.filter(c=>c.options.method==='POST').length,0);
-  assert.ok(overview.querySelector('textarea'));assert.equal(overview.querySelector('.sd-fleet-send').textContent,'Send');
+  assert.ok(m.d.querySelector('.sd-fleet-thread textarea'));assert.equal(m.d.querySelector('.sd-fleet-send').textContent,'Send');
  }finally{m.close();}
 });
 test('Svetozar click reaches the exact stored URL and not_sent is never shown as sent',async()=>{
@@ -109,7 +112,7 @@ test('Svetozar click reaches the exact stored URL and not_sent is never shown as
   browserCalls++;assert.equal(action,'send');assert.equal(body.threadUrl,'https://turo.com/us/en/inbox/messages/thread/63056209');return {status:'not_sent',message:'Source sign-in unavailable.'};
  })});
  try{
-  m.d.querySelector('[data-thread-id="63056209"]').click();const section=m.d.querySelector('.sd-source-thread');
+  m.w.kxOpenQueue('turo');m.d.querySelector('[data-thread-id="63056209"]').click();const section=m.d.querySelector('.sd-fleet-thread');
   const field=section.querySelector('textarea');field.value='Test transport only';field.dispatchEvent(new m.w.Event('input'));
   assert.equal(browserCalls,0);section.querySelector('.sd-fleet-send').click();await pause();assert.equal(browserCalls,1);
   assert.equal(section.querySelector('[data-status]').dataset.status,'not_sent');assert.match(section.textContent,/Not sent/);assert.equal(field.value,'Test transport only');
