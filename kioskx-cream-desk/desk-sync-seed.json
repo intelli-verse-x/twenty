@@ -1,0 +1,182 @@
+{
+  "indeed": {
+    "jobs": [
+      {
+        "id": "cargo-van-dallas",
+        "title": "Cargo Van Delivery Driver - E-commerce",
+        "city": "Dallas"
+      }
+    ],
+    "candidates": [
+      {
+        "id": "indeed:snapshot:1",
+        "name": "Donald Stephens",
+        "city": "Dallas",
+        "status": null,
+        "match": "Matched",
+        "interview": "Pending interview",
+        "screener": null,
+        "role": "Cargo Van Delivery Driver - E-commerce",
+        "jobId": "cargo-van-dallas"
+      },
+      {
+        "id": "indeed:snapshot:2",
+        "name": "Rick Arent",
+        "city": "Hurst",
+        "status": "Contacting",
+        "match": null,
+        "interview": null,
+        "screener": "2023 Kia Rio",
+        "role": "Cargo Van Delivery Driver - E-commerce",
+        "jobId": "cargo-van-dallas"
+      },
+      {
+        "id": "indeed:snapshot:3",
+        "name": "Aaron Romero",
+        "city": "Grand Prairie",
+        "status": null,
+        "match": "Matched",
+        "interview": null,
+        "screener": null,
+        "role": "Cargo Van Delivery Driver - E-commerce",
+        "jobId": "cargo-van-dallas"
+      },
+      {
+        "id": "indeed:snapshot:4",
+        "name": "Anthony Simmons Sr.",
+        "city": "Bedford",
+        "status": null,
+        "match": null,
+        "interview": "Pending interview",
+        "screener": null,
+        "role": "Cargo Van Delivery Driver - E-commerce",
+        "jobId": "cargo-van-dallas"
+      },
+      {
+        "id": "indeed:snapshot:5",
+        "name": "Jasmine Black",
+        "city": "Grand Prairie",
+        "status": null,
+        "match": "Matched",
+        "interview": null,
+        "screener": null,
+        "role": "Cargo Van Delivery Driver - E-commerce",
+        "jobId": "cargo-van-dallas"
+      },
+      {
+        "id": "indeed:snapshot:6",
+        "name": "Brandon Chandler",
+        "city": "Dallas",
+        "status": null,
+        "match": null,
+        "interview": null,
+        "screener": null,
+        "role": "Cargo Van Delivery Driver - E-commerce",
+        "jobId": "cargo-van-dallas"
+      }
+    ]
+  },
+  "turo": {
+    "cars": [
+      {
+        "id": "3900425",
+        "name": "Mercedes C300"
+      },
+      {
+        "id": "3969125",
+        "name": "2023 Tesla"
+      },
+      {
+        "id": "3969092",
+        "name": "GLS450"
+      },
+      {
+        "id": "3969119",
+        "name": "2027 Tesla"
+      }
+    ],
+    "trips": [
+      {
+        "id": "63056209",
+        "carId": "3900425",
+        "guest": "Svetozar",
+        "vehicle": "Mercedes-Benz C-Class 2024",
+        "plate": "VMG5659",
+        "current": true,
+        "endLabel": "15 Dec 2026 at 3:30 PM"
+      }
+    ],
+    "threads": [
+      {
+        "id": "snapshot:1",
+        "name": "Anil",
+        "line": "Cancelled \u00b7 2023 Tesla"
+      },
+      {
+        "id": "snapshot:2",
+        "name": "Weizhuo",
+        "line": "Past \u00b7 2023 Tesla \u00b7 invoice"
+      },
+      {
+        "id": "snapshot:3",
+        "name": "Samarth",
+        "line": "Cancelled \u00b7 2023 Tesla"
+      },
+      {
+        "id": "snapshot:4",
+        "name": "Victor",
+        "line": "Cancelled \u00b7 2023 Tesla"
+      },
+      {
+        "id": "snapshot:5",
+        "name": "Svetozar",
+        "line": "Booked \u00b7 C-Class \u00b7 lockbox line"
+      },
+      {
+        "id": "snapshot:6",
+        "name": "Dezeray",
+        "line": "Past \u00b7 C-Class"
+      },
+      {
+        "id": "snapshot:7",
+        "name": "Shanna",
+        "line": "Cancelled \u00b7 2027 Tesla"
+      },
+      {
+        "id": "snapshot:8",
+        "name": "Ihor",
+        "line": "Past \u00b7 2023 Tesla \u00b7 invoice"
+      },
+      {
+        "id": "snapshot:9",
+        "name": "Mariah",
+        "line": "Cancelled \u00b7 2027 Tesla"
+      },
+      {
+        "id": "snapshot:10",
+        "name": "Daniel",
+        "line": "Past \u00b7 C-Class"
+      },
+      {
+        "id": "snapshot:11",
+        "name": "Prabhjot",
+        "line": "Past \u00b7 C-Class"
+      },
+      {
+        "id": "snapshot:12",
+        "name": "Trevor",
+        "line": "Past \u00b7 C-Class \u00b7 invoice"
+      },
+      {
+        "id": "snapshot:13",
+        "name": "Mark",
+        "line": "Past \u00b7 C-Class"
+      },
+      {
+        "id": "snapshot:14",
+        "name": "Aadil",
+        "line": "Cancelled \u00b7 C-Class"
+      }
+    ]
+  }
+}
